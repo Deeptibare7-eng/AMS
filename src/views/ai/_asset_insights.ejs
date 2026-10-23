@@ -1,0 +1,57 @@
+<%# AI Insights card on the asset page (included only while "Data health" is on). Loads after the page. %>
+<div x-data="aiAssetInsights()" x-init="load()" class="bg-hams-card border border-white/5 rounded-3xl p-6">
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+    <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="sparkles" class="w-4 h-4 text-blue-400"></i>AI Insights</h2>
+    <a href="<%= hams_url('/ai/data-health') %>" class="text-xs text-blue-400 hover:text-blue-300">Data Health →</a>
+  </div>
+  <template x-if="!loaded"><p class="text-sm text-slate-500">Loading…</p></template>
+  <template x-if="loaded && failed"><p class="text-sm text-slate-500">AI insights are not available right now.</p></template>
+  <template x-if="loaded && !failed && d.retired"><p class="text-sm text-slate-500">Retired assets are not scored.</p></template>
+  <template x-if="loaded && !failed && !d.retired && !d.scored"><p class="text-sm text-slate-500">Not checked yet: it will be in the next data-health scan.</p></template>
+  <template x-if="loaded && !failed && d.scored">
+    <div>
+      <div class="flex items-center gap-4 mb-4">
+        <div class="w-16 h-16 rounded-2xl flex flex-col items-center justify-center"
+             :class="d.score >= 90 ? 'bg-emerald-500/10 text-emerald-400' : (d.score >= 70 ? 'bg-amber-500/10 text-amber-400' : 'bg-rose-500/10 text-rose-400')">
+          <span class="text-xl font-bold font-heading" x-text="Math.round(d.score)"></span><span class="text-[10px]">/ 100</span>
+        </div>
+        <div>
+          <div class="text-white font-medium" x-text="'Data health: ' + d.grade"></div>
+          <div class="text-xs text-slate-500" x-text="(d.issues.length ? d.issues.length + ' issue(s) found' : 'No data issues found') + (d.checked_at ? ' · checked ' + d.checked_at.slice(0, 10) : '')"></div>
+        </div>
+      </div>
+      <ul class="space-y-2">
+        <template x-for="i in d.issues" :key="i.code">
+          <li class="flex gap-3 text-sm">
+            <span class="mt-1.5 w-2 h-2 shrink-0 rounded-full" :class="i.severity === 'high' ? 'bg-rose-400' : (i.severity === 'medium' ? 'bg-amber-400' : 'bg-slate-400')" :title="i.severity"></span>
+            <span><span class="text-white" x-text="i.label"></span><span x-show="i.detail" class="block text-xs text-slate-400" x-text="i.detail"></span></span>
+          </li>
+        </template>
+      </ul>
+      <template x-if="d.recommendations.length">
+        <div class="mt-4 pt-4 border-t border-white/5">
+          <div class="text-xs text-slate-500 mb-2">Waiting in AI Approvals</div>
+          <template x-for="r in d.recommendations" :key="r.id">
+            <a href="<%= hams_url('/ai/approvals') %>" class="block text-sm text-blue-400 hover:text-blue-300" x-text="r.title + ' (' + Math.round(r.confidence * 100) + '% sure)'"></a>
+          </template>
+        </div>
+      </template>
+    </div>
+  </template>
+</div>
+<script>
+function aiAssetInsights() {
+  return {
+    loaded: false, failed: false, d: null,
+    async load() {
+      try {
+        const r = await fetch('<%= hams_url('/api/ai/assets/' + asset.id + '/insights') %>', { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error(r.status);
+        this.d = await r.json();
+      } catch (e) { this.failed = true; }
+      this.loaded = true;
+      this.$nextTick(() => window.lucide && window.lucide.createIcons());
+    }
+  };
+}
+</script>

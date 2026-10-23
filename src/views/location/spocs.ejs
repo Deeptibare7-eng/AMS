@@ -1,0 +1,147 @@
+<%
+  const field = 'mt-1 w-full px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-sm outline-none focus:border-blue-500';
+  const label = d => (d.office && d.office.office_name) || d.site;
+  // Sites with a SPOC first, then the rest; A–Z by office name.
+  const rows = directory.slice().sort((a, b) => (!a.spocs.length - !b.spocs.length) || label(a).localeCompare(label(b)));
+  const withSpoc = directory.filter(d => d.spocs.length).length;
+  const people = directory.reduce((n, d) => n + d.spocs.length, 0);
+  const canSignIn = directory.reduce((n, d) => n + d.spocs.filter(s => s.user_id).length, 0);
+%>
+<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+  <div>
+    <h1 class="font-heading text-2xl md:text-3xl font-bold text-white">Location SPOCs</h1>
+    <p class="text-sm text-slate-500 mt-1 max-w-3xl">The asset SPOC(s) for each office. SPOCs are shown in the <b class="text-slate-300">Location Workspace</b> and in new-joiner emails for their site, with the office address. A SPOC with sign-in sees only their own sites: stock by model and quality, allocation and check-in, new joiners, and smart insights.</p>
+    <p class="text-xs text-slate-400 mt-2"><b class="text-white"><%= withSpoc %></b> of <%= directory.length %> sites have a SPOC · <b class="text-white"><%= people %></b> SPOCs · <b class="text-white"><%= canSignIn %></b> can sign in</p>
+  </div>
+  <a href="<%= hams_url('/location-workspace') %>" class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-200"><i data-lucide="map-pinned" class="w-4 h-4"></i>Open Location Workspace</a>
+</div>
+
+<% if (created) { %>
+<div class="mb-6 px-5 py-4 rounded-2xl border bg-emerald-500/10 border-emerald-500/25 text-sm text-emerald-200">
+  <div class="font-semibold text-white mb-1"><%= created.reset ? 'New temporary password for ' + created.name : created.name + ' can now sign in' + (created.sites.length ? ' as SPOC for ' + created.sites.join(', ') : '') %></div>
+  Sign-in: <b class="text-white"><%= created.email %></b> · Temporary password: <code class="px-2 py-0.5 rounded bg-black/30 text-white select-all"><%= created.password %></code>
+  <div class="text-xs text-emerald-300/80 mt-1">Shown only now — pass it on securely. They must choose a new password at first sign-in.</div>
+</div>
+<% } %>
+
+<!-- Add a SPOC -->
+<details class="bg-hams-card border border-white/5 rounded-3xl mb-6 group">
+  <summary class="px-6 py-4 cursor-pointer list-none flex items-center gap-2 font-heading font-semibold text-white">
+    <i data-lucide="user-plus" class="w-4 h-4 text-blue-400"></i>Add a SPOC
+    <span class="text-xs font-normal text-slate-500">— name and phone are enough; add the email to let them sign in</span>
+    <i data-lucide="chevron-down" class="w-4 h-4 ml-auto text-slate-500 group-open:rotate-180 transition-transform"></i>
+  </summary>
+  <form method="POST" action="<%= hams_url('/location-spocs') %>" class="px-6 pb-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 items-end">
+    <%- csrf_field %>
+    <label class="block text-xs text-slate-400">SPOC name *
+      <input type="text" name="name" maxlength="255" placeholder="Full name" class="<%= field %>">
+    </label>
+    <label class="block text-xs text-slate-400">Contact number
+      <input type="text" name="phone" maxlength="50" placeholder="+91 …" class="<%= field %>">
+    </label>
+    <div class="text-xs text-slate-400">Office location(s) *
+      <div class="mt-1 flex">
+        <%- await include('../components/multi-select', { name: 'sites', placeholder: 'Choose sites', noun: 'sites', options: sites.map(s => { const d = directory.find(x => x.site === s); return { v: s, l: d && d.office && d.office.office_name ? `${d.office.office_name} (${s})` : s }; }), selected: [] }) %>
+      </div>
+    </div>
+    <label class="block text-xs text-slate-400">Work email (to sign in)
+      <input type="email" name="email" placeholder="Optional" class="<%= field %>">
+    </label>
+    <label class="block text-xs text-slate-400">Temporary password
+      <input type="text" name="password" minlength="8" maxlength="64" placeholder="Generated if empty" class="<%= field %>">
+    </label>
+    <button class="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"><i data-lucide="plus" class="w-4 h-4"></i>Add SPOC</button>
+    <p class="md:col-span-2 xl:col-span-6 text-[11px] text-slate-500">Without an email the SPOC is listed as a contact (shown to joiners and in the workspace) and can't sign in yet. With an email, an existing account is linked (password unchanged); otherwise an account is created with the <b class="text-slate-400">Location SPOC</b> role, which gives no access beyond their sites.</p>
+  </form>
+</details>
+
+<!-- Asset Location SPOCs -->
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+  <div class="table-responsive">
+    <table class="w-full min-w-[1100px] text-sm">
+      <thead><tr class="text-left text-xs uppercase bg-blue-600/20 text-blue-200 border-b border-white/5">
+        <th class="px-5 py-3.5 w-[200px]">Office Location</th><th class="px-5 py-3.5">SPOC Name</th><th class="px-5 py-3.5">Contact Number</th>
+        <th class="px-5 py-3.5 w-[320px]">Office Address</th><th class="px-5 py-3.5">Sign-in</th><th class="px-5 py-3.5 text-right">Actions</th>
+      </tr></thead>
+      <tbody>
+        <% for (const d of rows) { const list = d.spocs.length ? d.spocs : [null]; const office = d.office || {}; %>
+        <% list.forEach((s, i) => { %>
+        <tr class="<%= i === 0 ? 'border-t border-white/10' : '' %> align-top">
+          <% if (i === 0) { %>
+          <td class="px-5 py-3.5" rowspan="<%= list.length %>">
+            <div class="font-semibold text-white"><%= label(d) %></div>
+            <div class="text-[11px] text-slate-500 mt-0.5">Site <b class="text-slate-400"><%= d.site %></b><% if (d.assetLocations.length) { %> · <%= d.assetLocations.join(', ') %><% } %></div>
+            <a href="<%= hams_url('/location-workspace?site=' + encodeURIComponent(d.site)) %>" class="inline-block mt-1.5 text-xs text-blue-400 hover:underline">Workspace</a>
+          </td>
+          <% } %>
+          <% if (!s) { %>
+          <td class="px-5 py-3.5 text-amber-400/90 text-xs" colspan="2">No SPOC yet</td>
+          <% } else { %>
+          <td class="px-5 py-3.5">
+            <div class="text-slate-100 italic"><%= s.name %></div>
+            <div class="text-[11px] text-slate-500"><%= s.email || 'Contact only — no email yet' %></div>
+          </td>
+          <td class="px-5 py-3.5 text-slate-200 whitespace-nowrap"><%= s.phone || '—' %></td>
+          <% } %>
+          <% if (i === 0) { %>
+          <td class="px-5 py-3.5 text-xs text-slate-300" rowspan="<%= list.length %>">
+            <div class="whitespace-pre-line leading-relaxed"><%= office.address || '' %></div>
+            <% if (!office.address) { %><span class="text-slate-500">No address yet</span><% } %>
+            <details class="mt-1.5">
+              <summary class="cursor-pointer text-blue-400 hover:underline list-none">Edit office</summary>
+              <form method="POST" action="<%= hams_url('/location-spocs/office') %>" class="mt-2 space-y-2">
+                <%- csrf_field %><input type="hidden" name="site" value="<%= d.site %>">
+                <input type="text" name="office_name" maxlength="120" value="<%= office.office_name || '' %>" placeholder="Office location, e.g. Mumbai - Airoli" class="<%= field %>">
+                <textarea name="address" rows="4" maxlength="1000" placeholder="Office address" class="<%= field %>"><%= office.address || '' %></textarea>
+                <button class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs">Save office</button>
+              </form>
+            </details>
+          </td>
+          <% } %>
+          <% if (!s) { %>
+          <td class="px-5 py-3.5"></td><td class="px-5 py-3.5"></td>
+          <% } else { %>
+          <td class="px-5 py-3.5 text-xs">
+            <% if (s.user_id) { %>
+            <span class="<%= s.last_login_at ? 'text-slate-400' : 'text-amber-400/90' %>"><%= s.last_login_at ? 'Last sign-in ' + formatDateTime(s.last_login_at) : 'Not signed in yet' %><%= s.must_change_password ? ' · must set password' : '' %></span>
+            <% } else { %>
+            <details>
+              <summary class="cursor-pointer text-blue-400 hover:underline list-none">Enable sign-in</summary>
+              <form method="POST" action="<%= hams_url('/location-spocs/' + s.id + '/enable-sign-in') %>" class="mt-2 space-y-2 min-w-[220px]">
+                <%- csrf_field %>
+                <input type="email" name="email" required placeholder="Work email" class="<%= field %>">
+                <input type="text" name="password" minlength="8" maxlength="64" placeholder="Temp password (generated if empty)" class="<%= field %>">
+                <button class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs">Give sign-in</button>
+              </form>
+            </details>
+            <% } %>
+          </td>
+          <td class="px-5 py-3.5">
+            <div class="flex justify-end items-start gap-2">
+              <details class="relative">
+                <summary class="cursor-pointer list-none px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-slate-300">Edit</summary>
+                <form method="POST" action="<%= hams_url('/location-spocs/' + s.id + '/edit') %>" class="absolute right-0 z-20 mt-2 w-64 p-3 space-y-2 rounded-xl bg-hams-card border border-white/10 shadow-xl">
+                  <%- csrf_field %>
+                  <label class="block text-[11px] text-slate-400">Name<input type="text" name="name" required maxlength="255" value="<%= s.name %>" class="<%= field %>"></label>
+                  <label class="block text-[11px] text-slate-400">Contact number<input type="text" name="phone" maxlength="50" value="<%= s.phone || '' %>" class="<%= field %>"></label>
+                  <button class="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs">Save</button>
+                </form>
+              </details>
+              <% if (s.user_id) { %>
+              <form method="POST" action="<%= hams_url('/location-spocs/users/' + s.user_id + '/reset-password') %>" onsubmit="return confirm(<%= JSON.stringify('Give ' + s.name + ' a new temporary password?') %>)">
+                <%- csrf_field %><button class="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-slate-300 whitespace-nowrap">Reset password</button>
+              </form>
+              <% } %>
+              <form method="POST" action="<%= hams_url('/location-spocs/' + s.id + '/remove') %>" onsubmit="return confirm(<%= JSON.stringify('Remove ' + s.name + ' as SPOC for ' + label(d) + '?') %>)">
+                <%- csrf_field %><button class="px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-xs text-rose-400">Remove</button>
+              </form>
+            </div>
+          </td>
+          <% } %>
+        </tr>
+        <% }) %>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+</div>

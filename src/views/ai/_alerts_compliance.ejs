@@ -1,0 +1,51 @@
+<%# Licence compliance on Alerts (included only while "Licence compliance" is on and the user can see licences).
+    Rule-based findings; dormant (and says so) while there are no licence or software records. %>
+<div x-data="aiCompliance()" x-init="load()" class="bg-hams-card border border-white/5 rounded-3xl p-6 mb-6">
+  <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+    <div>
+      <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="scale" class="w-4 h-4 text-blue-400"></i>Licence compliance <span class="text-xs font-normal text-slate-500">AI rules</span></h2>
+      <p class="text-xs text-slate-500">Licences and software subscriptions checked against 10 rules. Each finding is a fact from the records, with why it matters; nothing is changed.</p>
+    </div>
+    <div class="text-[11px] text-slate-500 text-right" x-show="d && !d.dormant" x-text="d ? d.data.licenses + ' licences, ' + d.data.assignments + ' active assignments, ' + d.data.software + ' software records' : ''"></div>
+  </div>
+  <p x-show="!d && !failed" class="text-sm text-slate-500">Checking…</p>
+  <p x-show="failed" x-cloak class="text-sm text-slate-500">Not available right now.</p>
+  <template x-if="d && d.dormant">
+    <div class="text-sm text-slate-400">
+      <p class="mb-2">No licence or software records yet, so there is nothing to check. The checks start on their own as soon as licences are added (Licences) or software is imported:</p>
+      <ul class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-500 list-disc pl-5">
+        <template x-for="r in d.rules" :key="r.code"><li x-text="r.label + ' (' + r.severity + ')'"></li></template>
+      </ul>
+    </div>
+  </template>
+  <template x-if="d && !d.dormant">
+    <div>
+      <p x-show="!d.findings.length" class="text-sm text-emerald-400">All 10 checks pass.</p>
+      <div x-show="d.savings > 0" class="text-xs text-slate-400 mb-3" x-text="'Unused seats are worth about ' + Math.round(d.savings).toLocaleString('en-IN') + ' at their purchase price.'"></div>
+      <div class="space-y-2">
+        <template x-for="(f, i) in d.findings.slice(0, 40)" :key="i">
+          <a :href="'<%= hams_url('') %>' + f.target.url" class="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-white/[.02] hover:bg-white/5 text-sm">
+            <span class="w-2 h-2 rounded-full shrink-0" :class="f.severity === 'high' ? 'bg-rose-400' : (f.severity === 'medium' ? 'bg-amber-400' : 'bg-slate-400')" :title="f.severity"></span>
+            <span class="text-white" x-text="f.title"></span>
+            <span class="text-xs text-slate-400" x-text="f.label + ': ' + f.why"></span>
+          </a>
+        </template>
+      </div>
+      <p x-show="d.findings.length > 40" class="text-xs text-slate-500 mt-2" x-text="'+ ' + (d.findings.length - 40) + ' more'"></p>
+    </div>
+  </template>
+</div>
+<script>
+function aiCompliance() {
+  return {
+    d: null, failed: false,
+    async load() {
+      try {
+        const r = await fetch('<%= hams_url('/api/ai/compliance') %>', { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error(r.status);
+        this.d = await r.json();
+      } catch (e) { this.failed = true; }
+    }
+  };
+}
+</script>

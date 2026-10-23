@@ -1,0 +1,314 @@
+<%
+  const fmt = n => Number(n || 0).toLocaleString('en-IN');
+  const gradeColor = g => (g === 'good' ? 'emerald' : g === 'acceptable' ? 'amber' : 'slate');
+  const statusBadge = { ok: ['emerald', 'OK'], low: ['amber', 'Running low'], short: ['rose', 'Short'] };
+  const tabUrl = t => hams_url(`/location-workspace?site=${encodeURIComponent(site)}&tab=${t}`);
+  const card = 'bg-hams-card border border-white/5 rounded-2xl p-5';
+%>
+<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+  <div>
+    <h1 class="font-heading text-2xl md:text-3xl font-bold text-white flex items-center gap-3"><i data-lucide="map-pinned" class="w-7 h-7 text-blue-400"></i>Location Workspace</h1>
+    <p class="text-sm text-slate-500 mt-1">
+      <% if (site === 'all') { %>All sites — stock health, forecast and transfer suggestions
+      <% } else { %><b class="text-slate-300"><%= site %></b><% if (ws.office && ws.office.office_name) { %> · <%= ws.office.office_name %><% } %><% if (ws.officeNames.length) { %> · Asset Locations: <%= ws.officeNames.join(', ') %><% } %><% } %>
+    </p>
+    <% if (site !== 'all') { %>
+    <div class="flex flex-wrap items-start gap-x-6 gap-y-1 mt-2 text-xs">
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span class="text-slate-500 flex items-center gap-1"><i data-lucide="user-cog" class="w-3.5 h-3.5"></i>SPOC</span>
+        <% if (!ws.spocs.length) { %><span class="text-amber-400/90">not set</span><% } %>
+        <% for (const s of ws.spocs) { %><span class="text-slate-200"><%= s.name %><% if (s.phone) { %> <span class="text-slate-500">· <%= s.phone %></span><% } %></span><% } %>
+      </div>
+      <% if (ws.office && ws.office.address) { %>
+      <div class="text-slate-500 flex items-start gap-1 max-w-2xl"><i data-lucide="map-pin" class="w-3.5 h-3.5 mt-0.5 shrink-0"></i><span><%= ws.office.address.replace(/\s*\n\s*/g, ', ') %></span></div>
+      <% } %>
+    </div>
+    <% } %>
+  </div>
+  <% if (access.sites.length > 1) { %>
+  <form method="GET" action="<%= hams_url('/location-workspace') %>">
+    <select name="site" onchange="this.form.submit()" class="px-4 py-2.5 rounded-xl bg-hams-card border border-white/10 text-sm min-w-[220px]">
+      <option value="all" <%= site === 'all' ? 'selected' : '' %>>All sites</option>
+      <% for (const s of access.sites) { %><option value="<%= s %>" <%= site === s ? 'selected' : '' %>><%= s %></option><% } %>
+    </select>
+  </form>
+  <% } %>
+</div>
+
+<% if (site === 'all') { const net = network; %>
+<!-- ───────────── All sites ───────────── -->
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+  <div class="<%= card %> border-emerald-500/25"><div class="text-xs text-slate-500">Free laptops to allocate</div><div class="text-3xl font-bold font-heading text-emerald-400 mt-1"><%= fmt(net.rows.reduce((s, r) => s + r.forecast.free, 0)) %></div><div class="text-[11px] text-slate-500 mt-1">Good or Acceptable, not held for a joiner</div></div>
+  <div class="<%= card %>"><div class="text-xs text-slate-500">Sites short</div><div class="text-3xl font-bold font-heading text-rose-400 mt-1"><%= net.rows.filter(r => r.forecast.status === 'short').length %></div><div class="text-[11px] text-slate-500 mt-1">fewer free laptops than joiners due</div></div>
+  <div class="<%= card %>"><div class="text-xs text-slate-500">Sites running low</div><div class="text-3xl font-bold font-heading text-amber-400 mt-1"><%= net.rows.filter(r => r.forecast.status === 'low').length %></div><div class="text-[11px] text-slate-500 mt-1">below target (minimum <%= net.min %> spares)</div></div>
+  <div class="<%= card %>"><div class="text-xs text-slate-500">Suggested transfers</div><div class="text-3xl font-bold font-heading text-white mt-1"><%= net.transfers.length %></div><div class="text-[11px] text-slate-500 mt-1"><%= fmt(net.transfers.reduce((s, t) => s + t.count, 0)) %> laptops to move</div></div>
+</div>
+
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden mb-6">
+  <div class="px-6 pt-5 pb-3 flex items-center gap-2"><i data-lucide="sparkles" class="w-4 h-4 text-violet-400"></i><h2 class="font-heading font-semibold text-white">Stock health by site</h2></div>
+  <div class="table-responsive"><table class="w-full min-w-[1100px] text-sm">
+    <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
+      <th class="px-6 py-3">Site</th><th class="px-6 py-3">SPOC</th><th class="px-6 py-3 text-right">Free</th><th class="px-6 py-3 text-right">Good</th><th class="px-6 py-3 text-right">Laptops out</th>
+      <th class="px-6 py-3 text-right">Joiners due (30 d)</th><th class="px-6 py-3 text-right">Allocations / week</th><th class="px-6 py-3 text-right">Target</th><th class="px-6 py-3 text-right">Weeks of cover</th><th class="px-6 py-3">Status</th><th class="px-6 py-3"></th>
+    </tr></thead>
+    <tbody class="divide-y divide-white/5">
+      <% for (const r of net.rows.slice().sort((a, b) => ({ short: 0, low: 1, ok: 2 })[a.forecast.status] - ({ short: 0, low: 1, ok: 2 })[b.forecast.status] || a.site.localeCompare(b.site))) { const f = r.forecast; const b = statusBadge[f.status]; %>
+      <tr>
+        <td class="px-6 py-3 text-white font-medium"><%= r.site %><div class="text-[11px] text-slate-500"><%= r.office && r.office.office_name ? r.office.office_name + ' · ' : '' %><%= r.group %></div></td>
+        <td class="px-6 py-3 text-xs"><% if (!r.spocs.length) { %><span class="text-amber-400/90">not set</span><% } %><% for (const s of r.spocs) { %><div class="text-slate-200 whitespace-nowrap"><%= s.name %><% if (s.phone) { %> <span class="text-slate-500">· <%= s.phone %></span><% } %></div><% } %></td>
+        <td class="px-6 py-3 text-right text-emerald-400 font-medium"><%= fmt(f.free) %></td>
+        <td class="px-6 py-3 text-right"><%= fmt(r.good) %></td>
+        <td class="px-6 py-3 text-right text-slate-400"><%= fmt(r.out) %></td>
+        <td class="px-6 py-3 text-right"><%= fmt(f.dueJoiners) %></td>
+        <td class="px-6 py-3 text-right text-slate-400"><%= f.perWeek %></td>
+        <td class="px-6 py-3 text-right text-slate-400"><%= fmt(f.target) %></td>
+        <td class="px-6 py-3 text-right"><%= f.weeks === null ? '—' : f.weeks > 52 ? '52+' : f.weeks %></td>
+        <td class="px-6 py-3"><span class="px-2.5 py-1 rounded-lg text-xs font-medium bg-<%= b[0] %>-500/15 text-<%= b[0] %>-400"><%= b[1] %></span></td>
+        <td class="px-6 py-3 text-right"><% if (access.sites.includes(r.site)) { %><a href="<%= hams_url('/location-workspace?site=' + encodeURIComponent(r.site)) %>" class="text-xs text-blue-400 hover:underline">Open</a><% } %></td>
+      </tr>
+      <% } %>
+    </tbody>
+  </table></div>
+  <p class="px-6 py-3 text-[11px] text-slate-500 border-t border-white/5">Target = demand in the next 4 weeks (joiners due + recent allocations) + 20%, at least the minimum spares for sites that use laptops. Weeks of cover = free laptops ÷ weekly demand. Allocation rates count only allocations after the first register import.</p>
+</div>
+
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+  <div class="px-6 pt-5 pb-3 flex items-center gap-2"><i data-lucide="arrow-left-right" class="w-4 h-4 text-violet-400"></i><h2 class="font-heading font-semibold text-white">Suggested transfers</h2>
+    <span class="text-xs text-slate-500">— only between sites of the same company and country</span></div>
+  <% if (!net.transfers.length) { %><p class="px-6 pb-6 text-sm text-slate-400">No transfers needed: every site that needs laptops has enough, or no site in the same group has spares.</p><% } else { %>
+  <div class="table-responsive"><table class="w-full min-w-[800px] text-sm">
+    <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5"><th class="px-6 py-3">From</th><th class="px-6 py-3">To</th><th class="px-6 py-3 text-right">Laptops</th><th class="px-6 py-3">Suggested models</th><th class="px-6 py-3">Why</th></tr></thead>
+    <tbody class="divide-y divide-white/5">
+      <% for (const t of net.transfers) { %>
+      <tr><td class="px-6 py-3 text-white"><%= t.from %></td><td class="px-6 py-3 text-white"><%= t.to %></td><td class="px-6 py-3 text-right font-medium"><%= t.count %></td>
+        <td class="px-6 py-3 text-slate-300"><%= t.models %></td><td class="px-6 py-3 text-xs text-slate-500"><%= t.why %></td></tr>
+      <% } %>
+    </tbody>
+  </table></div><% } %>
+</div>
+
+<% } else { const c = ws.counts; const f = ws.forecast; const b = statusBadge[f.status]; %>
+<!-- ───────────── One site ───────────── -->
+<div class="flex flex-wrap gap-2 mb-6">
+  <% for (const [t, label, icon] of [['overview', 'Overview & insights', 'sparkles'], ['stock', 'Stock by model', 'layers-3'], ['allocate', 'Allocate & check in', 'user-plus'], ['joiners', 'New joiners (' + ws.joiners.all.length + ')', 'user-check']]) { %>
+  <a href="<%= tabUrl(t) %>" class="flex items-center gap-2 px-4 py-2 rounded-xl text-sm <%= tab === t ? 'bg-blue-600 text-white' : 'bg-white/5 hover:bg-white/10 text-slate-300' %>"><i data-lucide="<%= icon %>" class="w-4 h-4"></i><%= label %></a>
+  <% } %>
+</div>
+
+<% if (tab === 'overview') { %>
+<div class="grid grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
+  <div class="<%= card %> border-emerald-500/25"><div class="text-xs text-slate-500">Free to allocate</div><div class="text-3xl font-bold font-heading text-emerald-400 mt-1"><%= fmt(c.free) %></div><div class="text-[11px] text-slate-500 mt-1"><%= c.drafted ? fmt(c.drafted) + ' more held for joiners' : 'laptops, Good or Acceptable' %></div></div>
+  <div class="<%= card %>"><div class="text-xs text-slate-500">Good</div><div class="text-3xl font-bold font-heading text-white mt-1"><%= fmt(c.good) %></div><div class="text-[11px] text-slate-500 mt-1">in warranty, 16 GB+, recent CPU</div></div>
+  <div class="<%= card %>"><div class="text-xs text-slate-500">Acceptable</div><div class="text-3xl font-bold font-heading text-white mt-1"><%= fmt(c.acceptable) %></div><div class="text-[11px] text-slate-500 mt-1">10th gen+, 8 GB+</div></div>
+  <div class="<%= card %>"><div class="text-xs text-slate-500">Not offered</div><div class="text-3xl font-bold font-heading text-slate-300 mt-1"><%= fmt(c.old + c.faulty + c.reserved) %></div><div class="text-[11px] text-slate-500 mt-1"><%= c.old %> old · <%= c.faulty %> faulty · <%= c.reserved %> reserved</div></div>
+  <div class="<%= card %>"><div class="text-xs text-slate-500">Laptops out at site</div><div class="text-3xl font-bold font-heading text-white mt-1"><%= fmt(c.outLaptops) %></div><div class="text-[11px] text-slate-500 mt-1"><%= fmt(c.out) %> devices in all</div></div>
+  <div class="<%= card %>"><div class="text-xs text-slate-500">Joiners due (30 days)</div><div class="text-3xl font-bold font-heading text-white mt-1"><%= fmt(f.dueJoiners) %></div><div class="text-[11px] text-slate-500 mt-1"><%= fmt(ws.joiners.all.length) %> not yet allocated</div></div>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+  <!-- Forecast -->
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <div class="flex items-center justify-between gap-3 mb-3">
+      <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="trending-down" class="w-4 h-4 text-violet-400"></i>Stock forecast</h2>
+      <span class="px-2.5 py-1 rounded-lg text-xs font-medium bg-<%= b[0] %>-500/15 text-<%= b[0] %>-400"><%= b[1] %></span>
+    </div>
+    <p class="text-sm text-slate-300 leading-relaxed">
+      <b class="text-white"><%= fmt(f.free) %></b> free laptops. Demand in the next 4 weeks is about <b class="text-white"><%= fmt(f.demand4w) %></b>
+      (<%= f.dueJoiners %> joiner<%= f.dueJoiners === 1 ? '' : 's' %> due + <%= ws.rate.perWeek.toFixed(1) %> allocations a week).
+      Target <b class="text-white"><%= fmt(f.target) %></b>.
+      <% if (f.weeks === null) { %>No allocations or joiners recorded yet, so there's no demand to forecast from.
+      <% } else { %>That's about <b class="text-white"><%= f.weeks > 52 ? 'a year or more' : f.weeks + ' week' + (f.weeks === 1 ? '' : 's') %></b> of cover.<% } %>
+    </p>
+    <p class="text-[11px] text-slate-500 mt-2"><%= ws.rate.allocations %> laptop allocation<%= ws.rate.allocations === 1 ? '' : 's' %> at this site in the last <%= ws.rate.weeks %> week<%= ws.rate.weeks === 1 ? '' : 's' %> (counted after the first register import).</p>
+    <% if (transfers && transfers.length) { %>
+    <div class="mt-4 pt-4 border-t border-white/5">
+      <div class="text-xs font-semibold text-slate-400 uppercase mb-2 flex items-center gap-1.5"><i data-lucide="arrow-left-right" class="w-3.5 h-3.5"></i>Suggested transfers</div>
+      <% for (const t of transfers) { %>
+      <div class="text-sm text-slate-300 py-1"><b class="text-white"><%= t.count %></b> from <b class="text-white"><%= t.from %></b> to <b class="text-white"><%= t.to %></b><span class="text-slate-500"> — <%= t.models %></span></div>
+      <% } %>
+    </div>
+    <% } %>
+  </div>
+
+  <!-- Refresh list -->
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <h2 class="font-heading font-semibold text-white flex items-center gap-2 mb-3"><i data-lucide="refresh-ccw" class="w-4 h-4 text-violet-400"></i>Refresh list</h2>
+    <p class="text-sm text-slate-300"><b class="text-white"><%= fmt(ws.refresh.total) %></b> laptops out at this site are old or out of warranty. <b class="text-white"><%= fmt(c.good) %></b> Good spares are here to replace them.</p>
+    <% if (ws.refresh.items.length) { %>
+    <div class="table-responsive mt-3 max-h-72 overflow-y-auto"><table class="w-full text-xs">
+      <thead><tr class="text-left text-slate-500 uppercase border-b border-white/5"><th class="py-2 pr-3">Asset</th><th class="py-2 pr-3">Model</th><th class="py-2 pr-3">Holder</th><th class="py-2">Why</th></tr></thead>
+      <tbody class="divide-y divide-white/5">
+        <% for (const o of ws.refresh.items.slice(0, 15)) { %>
+        <tr><td class="py-2 pr-3 font-mono text-slate-300"><%= o.asset_tag %></td><td class="py-2 pr-3 text-slate-300"><%= o.model_number || '—' %></td>
+          <td class="py-2 pr-3 text-slate-400"><%= o.holder || '—' %></td><td class="py-2 text-slate-500"><%= o.info.summary %></td></tr>
+        <% } %>
+      </tbody>
+    </table></div>
+    <% if (ws.refresh.total > 15) { %><p class="text-[11px] text-slate-500 mt-2">Oldest 15 of <%= fmt(ws.refresh.total) %> shown.</p><% } %>
+    <% } %>
+  </div>
+
+  <!-- Data-quality alerts -->
+  <div class="xl:col-span-2 bg-hams-card border border-white/5 rounded-3xl p-6">
+    <h2 class="font-heading font-semibold text-white flex items-center gap-2 mb-3"><i data-lucide="shield-alert" class="w-4 h-4 text-violet-400"></i>Data-quality alerts</h2>
+    <% const q = ws.quality;
+       const alerts = [
+         ['"In Stock" but Machine Name says Returned to client', 'These offices list them as stock, but they are with the client. Check and update the register (e.g. Retired - Returned to Client).', q.returned.map(a => `${a.asset_tag} · ${a.model_number || ''} · ${a.machine}`)],
+         ['"In Stock" laptops whose Machine Name is a computer name', 'No "<site> IT STOCK" in Machine Name, so they are not counted as this site\'s stock. Check they are on the shelf and update Machine Name.', q.hostInStock.map(a => `${a.asset_tag} · ${a.model_number || ''} · ${a.machine}`)],
+         ['Stock with a fault noted', 'Not offered for allocation. Repair or retire them.', q.faulty.map(a => `${a.asset_tag} · ${a.model} · ${a.machine}`)],
+         ['Old laptops still in stock', 'Below 10th-gen CPU or under 8 GB — not offered. Consider retiring them.', q.oldInStock.map(a => `${a.asset_tag} · ${a.model} · ${a.info.summary}`)],
+         ['Client / project reserved stock', 'Kept out of general allocation (Kyruus, HHP, Gravie, DeepHealth, Rental, Do not Format).', q.reserved.map(a => `${a.asset_tag} · ${a.model} · ${a.machine}`)],
+         ['Same model written two ways', 'Filters and counts treat these as different models. Standardise the name in the register.', q.variants.map(v => v.join('  ·  '))]
+       ]; %>
+    <div class="divide-y divide-white/5">
+      <% for (const [title, hint, items] of alerts) { %>
+      <details class="py-2 group" <%= items.length ? '' : 'disabled' %>>
+        <summary class="flex items-center gap-3 cursor-pointer list-none">
+          <span class="w-8 text-right font-bold font-heading <%= items.length ? 'text-amber-400' : 'text-slate-600' %>"><%= fmt(items.length) %></span>
+          <span class="text-sm <%= items.length ? 'text-slate-200' : 'text-slate-500' %>"><%= title %></span>
+          <% if (items.length) { %><i data-lucide="chevron-down" class="w-4 h-4 text-slate-500 ml-auto group-open:rotate-180 transition-transform"></i><% } %>
+        </summary>
+        <% if (items.length) { %>
+        <div class="pl-11 pt-2 text-xs">
+          <p class="text-slate-500 mb-1"><%= hint %></p>
+          <ul class="max-h-48 overflow-y-auto space-y-0.5 text-slate-400 font-mono"><% for (const it of items.slice(0, 100)) { %><li><%= it %></li><% } %></ul>
+          <% if (items.length > 100) { %><p class="text-slate-500 mt-1">… and <%= fmt(items.length - 100) %> more.</p><% } %>
+        </div>
+        <% } %>
+      </details>
+      <% } %>
+    </div>
+  </div>
+</div>
+
+<% } else if (tab === 'stock') { %>
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden mb-4">
+  <div class="px-6 pt-5 pb-3"><h2 class="font-heading font-semibold text-white">Laptops in <%= site %> stock, by model</h2>
+    <p class="text-xs text-slate-500">Best models first. Open a model to see its units, best first; only Good and Acceptable units can be allocated.</p></div>
+  <div class="table-responsive"><table class="w-full min-w-[980px] text-sm">
+    <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
+      <th class="px-6 py-3">Model</th><th class="px-6 py-3 text-right">In stock</th><th class="px-6 py-3 text-right">Good</th><th class="px-6 py-3 text-right">Acceptable</th><th class="px-6 py-3 text-right">Old</th><th class="px-6 py-3 text-right">Faulty / reserved</th><th class="px-6 py-3">Processor · RAM</th><th class="px-6 py-3">Warranty to</th>
+    </tr></thead>
+    <% for (const m of ws.models) { %>
+    <tbody x-data="{ open: false }" class="border-b border-white/5">
+      <tr class="hover:bg-white/[.02] cursor-pointer" @click="open = !open">
+        <td class="px-6 py-3"><div class="flex items-center gap-2"><i data-lucide="chevron-right" class="w-4 h-4 text-slate-500 transition-transform" :class="open && 'rotate-90'"></i>
+          <span class="text-white font-medium"><%= m.model %></span><span class="text-xs text-slate-500"><%= m.maker || '' %></span>
+          <span class="px-2 py-0.5 rounded-md text-[11px] bg-<%= gradeColor(m.best) %>-500/15 text-<%= gradeColor(m.best) %>-400"><%= grades[m.best] %></span></div></td>
+        <td class="px-6 py-3 text-right"><%= fmt(m.total) %></td>
+        <td class="px-6 py-3 text-right text-emerald-400"><%= m.good || '—' %></td>
+        <td class="px-6 py-3 text-right text-amber-400"><%= m.acceptable || '—' %></td>
+        <td class="px-6 py-3 text-right text-slate-400"><%= m.old || '—' %></td>
+        <td class="px-6 py-3 text-right text-slate-400"><%= (m.faulty + m.reserved) || '—' %></td>
+        <td class="px-6 py-3 text-xs text-slate-400"><%= m.cpus %> · <%= m.rams %></td>
+        <td class="px-6 py-3 text-xs <%= m.wMax && m.wMax >= today ? 'text-slate-300' : 'text-slate-500' %>"><%= m.wMin === m.wMax ? (m.wMax || '—') : `${m.wMin} – ${m.wMax}` %></td>
+      </tr>
+      <tr x-show="open" x-cloak><td colspan="8" class="px-6 pb-4">
+        <div class="rounded-xl bg-black/20 border border-white/5 max-h-72 overflow-y-auto">
+          <table class="w-full text-xs">
+            <% for (const u of m.units) { %>
+            <tr class="border-b border-white/5 last:border-0">
+              <td class="px-4 py-2 font-mono text-slate-300"><%= u.asset_tag %></td><td class="px-4 py-2 text-slate-500"><%= u.serial_number || '' %></td>
+              <td class="px-4 py-2 <%= u.info.usable ? 'text-' + gradeColor(u.info.grade) + '-400' : 'text-slate-500' %>"><%= u.info.summary %><%= u.info.usable ? '' : ' — not offered: ' + u.info.why %></td>
+              <td class="px-4 py-2 text-right"><% if (u.info.usable) { %><a href="<%= tabUrl('allocate') %>&asset=<%= u.id %>" class="text-blue-400 hover:underline">Allocate</a><% } %></td>
+            </tr>
+            <% } %>
+          </table>
+        </div>
+      </td></tr>
+    </tbody>
+    <% } %>
+    <% if (!ws.models.length) { %><tbody><tr><td colspan="8" class="px-6 py-10 text-center text-slate-500">No laptops in <%= site %> stock.</td></tr></tbody><% } %>
+  </table></div>
+</div>
+<% if (ws.others.length) { %>
+<p class="text-sm text-slate-400">Other devices in <%= site %> stock: <%= ws.others.map(o => `${o.category} ${fmt(o.n)}`).join(' · ') %></p>
+<% } %>
+
+<% } else if (tab === 'allocate') { %>
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+  <form method="POST" action="<%= hams_url('/location-workspace/allocate') %>" class="bg-hams-card border border-white/5 rounded-3xl p-6 space-y-4 self-start">
+    <%- csrf_field %><input type="hidden" name="site" value="<%= site %>">
+    <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="user-plus" class="w-4 h-4 text-blue-400"></i>Allocate a laptop</h2>
+    <label class="block text-xs text-slate-400">Laptop (best first) *
+      <select name="asset_id" required class="mt-1 w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm">
+        <% if (!ws.free.length) { %><option value="">No free laptops in <%= site %> stock</option><% } %>
+        <% for (const l of ws.free) { %><option value="<%= l.id %>" <%= String(l.id) === String(selectedAsset || '') ? 'selected' : '' %>><%= l.model %> — <%= l.asset_tag %> · <%= l.info.summary %></option><% } %>
+      </select>
+    </label>
+    <div class="text-xs text-slate-400">Employee *
+      <div class="mt-1"><%- await include('../components/picker', { name: 'user_id', endpoint: hams_url('/location-workspace/people'), required: true, placeholder: 'Type a name or CTID…' }) %></div>
+    </div>
+    <label class="block text-xs text-slate-400">Notes
+      <input type="text" name="notes" maxlength="500" placeholder="Optional" class="mt-1 w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm outline-none focus:border-blue-500">
+    </label>
+    <button <%= ws.free.length ? '' : 'disabled' %> class="w-full flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-40"><i data-lucide="check" class="w-4 h-4"></i>Allocate</button>
+    <p class="text-[11px] text-slate-500">Only Good or Acceptable laptops from <%= site %> stock that aren't held for a joiner are listed.</p>
+  </form>
+
+  <div class="xl:col-span-2 bg-hams-card border border-white/5 rounded-3xl overflow-hidden" x-data="{ q: '' }">
+    <div class="px-6 pt-5 pb-3 flex flex-wrap items-center justify-between gap-3">
+      <div><h2 class="font-heading font-semibold text-white">Devices out at <%= site %></h2>
+        <p class="text-xs text-slate-500"><%= fmt(ws.counts.out) %> in all<%= ws.counts.out > ws.out.length ? ' · latest ' + ws.out.length + ' shown' : '' %>. Check one in when it comes back.</p></div>
+      <input type="text" x-model="q" placeholder="Filter by tag, model or person…" class="px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-sm w-64 outline-none focus:border-blue-500">
+    </div>
+    <div class="table-responsive max-h-[32rem] overflow-y-auto"><table class="w-full min-w-[760px] text-sm">
+      <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5"><th class="px-6 py-3">Asset</th><th class="px-6 py-3">Model</th><th class="px-6 py-3">Holder</th><th class="px-6 py-3">Since</th><th class="px-6 py-3 text-right">Check in</th></tr></thead>
+      <tbody class="divide-y divide-white/5">
+        <% for (const o of ws.out) { const key = [o.asset_tag, o.model_number, o.holder, o.employee_id].filter(Boolean).join(' ').toLowerCase(); %>
+        <tr x-show="!q || <%= JSON.stringify(key) %>.includes(q.toLowerCase())">
+          <td class="px-6 py-2.5 font-mono text-slate-300"><%= o.asset_tag %><div class="text-[11px] text-slate-500 font-sans"><%= o.category || '' %></div></td>
+          <td class="px-6 py-2.5 text-slate-300"><%= o.model_number || '—' %><div class="text-[11px] text-slate-500"><%= o.category === 'Laptop' ? o.info.summary : '' %></div></td>
+          <td class="px-6 py-2.5 text-slate-300"><%= o.holder || '—' %><div class="text-[11px] text-slate-500"><%= o.employee_id && o.employee_id !== o.holder ? o.employee_id : '' %></div></td>
+          <td class="px-6 py-2.5 text-xs text-slate-500"><%= o.assigned_at ? formatDate(o.assigned_at) : '—' %></td>
+          <td class="px-6 py-2.5">
+            <form method="POST" action="<%= hams_url('/location-workspace/checkin') %>" class="flex justify-end items-center gap-2" onsubmit="return confirm(<%= JSON.stringify('Check in ' + o.asset_tag + (o.holder ? ' from ' + o.holder : '') + '?') %>)">
+              <%- csrf_field %><input type="hidden" name="site" value="<%= site %>"><input type="hidden" name="asset_id" value="<%= o.id %>">
+              <select name="condition" class="px-2 py-1.5 rounded-lg bg-hams-bg border border-white/10 text-xs"><option value="good">Good</option><option value="repair">Needs repair</option><option value="damaged">Damaged</option></select>
+              <button class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-slate-200">Check in</button>
+            </form>
+          </td>
+        </tr>
+        <% } %>
+        <% if (!ws.out.length) { %><tr><td colspan="5" class="px-6 py-10 text-center text-slate-500">Nothing allocated at <%= site %>.</td></tr><% } %>
+      </tbody>
+    </table></div>
+  </div>
+</div>
+
+<% } else if (tab === 'joiners') { const siteLaptops = options.laptops.filter(l => l.site === site); %>
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+  <div class="px-6 pt-5 pb-3"><h2 class="font-heading font-semibold text-white">New joiners at <%= site %></h2>
+    <p class="text-xs text-slate-500">The agent drafts the best free laptop for each joiner. Change it if needed, then approve: the laptop is allocated and the joiner is emailed (you're in CC).</p></div>
+  <div class="table-responsive"><table class="w-full min-w-[980px] text-sm">
+    <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5"><th class="px-6 py-3">Joiner</th><th class="px-6 py-3">Joins</th><th class="px-6 py-3">Drafted laptop</th><th class="px-6 py-3">Change laptop</th><th class="px-6 py-3 text-right"></th></tr></thead>
+    <tbody class="divide-y divide-white/5">
+      <% for (const j of joinees) { const done = j.allocation_status === 'allocated'; %>
+      <tr>
+        <td class="px-6 py-3"><div class="text-white font-medium"><%= j.name %></div><div class="text-xs text-slate-500"><%= j.employee_id %> · <%= j.designation %> · <%= j.location_name || '' %></div></td>
+        <td class="px-6 py-3 text-slate-400"><%= formatDate(j.date_of_joining) %></td>
+        <td class="px-6 py-3"><% if (j.laptop_model) { %><div class="text-slate-200"><%= j.laptop_model %> <span class="text-xs text-slate-500"><%= j.laptop_tag %></span></div>
+          <% if (j.laptop && !done) { %><div class="text-[11px] text-<%= gradeColor(j.laptop.grade) %>-400/90"><%= j.laptop.summary %></div><% } %>
+          <% } else { %><span class="text-amber-400/90 text-xs">No free laptop drafted</span><% } %></td>
+        <td class="px-6 py-3"><% if (!done) { %>
+          <form method="POST" action="<%= hams_url('/location-workspace/joinees/' + j.id + '/laptop') %>" class="flex gap-2">
+            <%- csrf_field %><input type="hidden" name="site" value="<%= site %>">
+            <select name="laptop_asset_id" class="px-2 py-1.5 rounded-lg bg-hams-bg border border-white/10 text-xs max-w-[260px]">
+              <% for (const l of siteLaptops.slice(0, 300)) { %><option value="<%= l.id %>" <%= l.id === j.draft_laptop_asset_id ? 'selected' : '' %>><%= l.model %> — <%= l.tag %> · <%= l.detail %></option><% } %>
+            </select>
+            <button class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-slate-200">Save</button>
+          </form><% } %></td>
+        <td class="px-6 py-3 text-right"><% if (done) { %><span class="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-semibold">ALLOCATED</span>
+          <% } else { %>
+          <form method="POST" action="<%= hams_url('/location-workspace/joinees/' + j.id + '/approve') %>" onsubmit="return confirm(<%= JSON.stringify('Allocate the drafted laptop to ' + j.name + ' and email them?') %>)">
+            <%- csrf_field %><input type="hidden" name="site" value="<%= site %>">
+            <button <%= j.draft_laptop_asset_id ? '' : 'disabled' %> class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium disabled:opacity-40">Approve &amp; allocate</button>
+          </form><% } %></td>
+      </tr>
+      <% } %>
+      <% if (!joinees.length) { %><tr><td colspan="5" class="px-6 py-10 text-center text-slate-500">No new joiners at <%= site %>.</td></tr><% } %>
+    </tbody>
+  </table></div>
+</div>
+<% } %>
+<% } %>

@@ -1,0 +1,14 @@
+<%# Hardware: a question in plain language and the filters it became (only while "Questions in plain language" is on).
+    Each chip removes its filter; "Not what I meant" keeps the question so the assistant can learn it. %>
+<div class="mb-6 -mt-3 px-4 py-3 rounded-2xl bg-blue-500/5 border border-blue-500/15 text-xs text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-2">
+  <span class="flex items-center gap-1.5 text-blue-300 font-medium"><i data-lucide="message-circle-question" class="w-3.5 h-3.5"></i><%= askBanner.question ? 'You asked' : 'Filters from a question' %></span>
+  <% if (askBanner.question) { %><span class="text-slate-200">"<%= askBanner.question %>"</span><span class="text-slate-500">— understood as:</span><% } %>
+  <% for (const c of askBanner.chips) { %>
+  <a href="<%= hams_url(c.remove) %>" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white/5 text-slate-200 hover:bg-white/10" title="Remove this filter"><%= c.label %><span class="text-slate-500">×</span></a>
+  <% } %>
+  <% if (!askBanner.chips.length) { %><span class="text-slate-500">no filters (showing a search instead)</span><% } %>
+  <% if (askBanner.question) { %>
+  <form method="POST" action="<%= hams_url('/ai/ask/miss') %>" class="ml-auto"><%- csrf_field %><input type="hidden" name="q" value="<%= askBanner.question %>">
+    <button class="text-slate-500 hover:text-slate-300 underline">Not what I meant</button></form>
+  <% } %>
+</div>

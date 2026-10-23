@@ -1,0 +1,83 @@
+<%# Cost forecast on the dashboard (included only while "Cost forecast & refresh plan" is on). Loads after the page.
+    One chart, one axis (money per quarter): past purchase-order spend (solid) and the expected replacement need
+    from refresh risk (light, outlined). %>
+<div x-data="aiCostCard()" x-init="load()" x-show="d && d.ready" x-cloak class="bg-hams-card border border-white/5 rounded-3xl p-6 mb-6">
+  <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+    <div>
+      <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="piggy-bank" class="w-4 h-4 text-blue-400"></i>Cost forecast</h2>
+      <p class="text-xs text-slate-500">What replacing the assets expected to be retired will cost (AI estimate from refresh risk), next to past purchase-order spend.</p>
+    </div>
+    <a href="<%= hams_url('/ai/planning') %>" class="text-xs text-blue-400 hover:text-blue-300">Plan within a budget →</a>
+  </div>
+  <template x-if="d && d.ready">
+    <div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-5">
+        <div>
+          <div class="text-xs text-slate-500">Replacement need, next 12 months</div>
+          <div class="text-3xl font-bold font-heading text-white" x-text="money(d.need.next12.cost)"></div>
+          <div class="text-xs text-slate-500" x-text="'~' + Math.round(d.need.next12.units).toLocaleString('en-IN') + ' assets of ' + d.need.assets.toLocaleString('en-IN') + ' scored' + (d.scoped ? ' in your locations' : '')"></div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">Next 24 months</div>
+          <div class="text-3xl font-bold font-heading text-white" x-text="money(d.need.next24.cost)"></div>
+          <div class="text-xs text-slate-500" x-text="'~' + Math.round(d.need.next24.units).toLocaleString('en-IN') + ' assets'"></div>
+        </div>
+        <div x-show="d.pace">
+          <div class="text-xs text-slate-500">Past spend pace (all locations)</div>
+          <div class="text-3xl font-bold font-heading text-slate-300" x-text="d.pace ? '≈ ' + money(d.pace.yearly) + ' / year' : ''"></div>
+          <div class="text-[11px] text-slate-500" x-text="d.pace ? paceNote() : ''"></div>
+        </div>
+      </div>
+      <div class="flex items-end gap-1 h-40 border-b border-white/10" role="img" :aria-label="'Quarterly spend and expected replacement need'">
+        <template x-for="(b, i) in bars()" :key="i">
+          <div class="flex-1 flex flex-col justify-end h-full group" :title="b.title">
+            <div class="rounded-t-md" :class="b.future ? 'border border-dashed border-blue-400/70 bg-blue-500/20' : 'bg-blue-500'" :style="'height:' + Math.max(1, b.h) + '%'"></div>
+          </div>
+        </template>
+      </div>
+      <div class="flex gap-1 mt-1 text-[10px] text-slate-500">
+        <template x-for="(b, i) in bars()" :key="'l' + i"><div class="flex-1 text-center truncate" x-text="i % 2 === 0 ? b.short : ''"></div></template>
+      </div>
+      <div class="flex flex-wrap items-center gap-4 mt-3 text-[11px] text-slate-500">
+        <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-blue-500"></span>Purchase-order spend</span>
+        <span class="flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm border border-dashed border-blue-400/70 bg-blue-500/20"></span>Expected replacement need</span>
+        <span class="ml-auto">Hover a bar for the amount. Replacement costs: <span x-text="costs()"></span>.</span>
+      </div>
+    </div>
+  </template>
+</div>
+<script>
+function aiCostCard() {
+  return {
+    d: null,
+    money(v) {
+      const cur = this.d.currency, x = Number(v) || 0;
+      if (cur.code === 'INR') return x >= 1e7 ? cur.symbol + (x / 1e7).toFixed(1) + ' Cr' : x >= 1e5 ? cur.symbol + (x / 1e5).toFixed(1) + ' L' : cur.symbol + Math.round(x).toLocaleString('en-IN');
+      return x >= 1e6 ? cur.symbol + (x / 1e6).toFixed(1) + 'M' : cur.symbol + Math.round(x).toLocaleString('en-IN');
+    },
+    paceNote() {
+      const p = this.d.pace, best = p.backtest[p.best_rule];
+      return p.forecastable ? 'Holt-Winters forecast of past spend'
+        : 'Spending comes in waves: no method predicted a quarter well (best was off by ' + Math.round(best.mae_share * 100) + '% of an average quarter), so plan from the need.';
+    },
+    costs() {
+      return Object.entries(this.d.unit_costs).filter(([c]) => !/^VM/.test(c)).map(([c, u]) => c + ' ' + this.money(u.cost)).join(', ');
+    },
+    bars() {
+      if (!this.d) return [];
+      const past = this.d.history.quarters.map((q, i) => ({ short: q, value: this.d.history.values[i], future: false, title: q + ': ' + this.money(this.d.history.values[i]) + ' spent (purchase orders)' }));
+      const next = this.d.need.quarters.map(q => ({ short: q.label.split(' – ')[0], value: q.cost, future: true,
+        title: q.label + ': ~' + Math.round(q.units).toLocaleString('en-IN') + ' replacements ≈ ' + this.money(q.cost) + ' (expected need)' }));
+      const all = [...past, ...next];
+      const max = Math.max(1, ...all.map(b => b.value));
+      return all.map(b => ({ ...b, h: (b.value / max) * 100 }));
+    },
+    async load() {
+      try {
+        const r = await fetch('<%= hams_url('/api/ai/cost/forecast') %>', { headers: { Accept: 'application/json' } });
+        if (r.ok) this.d = await r.json();
+      } catch (e) { /* the card stays hidden */ }
+    }
+  };
+}
+</script>

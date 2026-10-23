@@ -1,0 +1,72 @@
+<div class="space-y-6">
+  <div>
+    <h1 class="font-heading text-2xl md:text-3xl font-bold text-white mb-1">AI Approvals</h1>
+    <p class="text-sm text-slate-500">Recommendations from the in-house AI. Nothing changes until someone accepts. Accepting applies the change with the same rules as doing it by hand (location access, stock ledger, audit log); rejecting teaches the AI.</p>
+  </div>
+
+  <div class="flex gap-2">
+    <a href="<%= hams_url('/ai/approvals') %>" class="px-4 py-2 rounded-xl text-sm <%= view === 'pending' ? 'bg-blue-600/10 text-blue-400 font-medium' : 'text-slate-400 hover:bg-white/5' %>">Waiting<%= view === 'pending' ? ' (' + total + ')' : '' %></a>
+    <a href="<%= hams_url('/ai/approvals?view=decided') %>" class="px-4 py-2 rounded-xl text-sm <%= view === 'decided' ? 'bg-blue-600/10 text-blue-400 font-medium' : 'text-slate-400 hover:bg-white/5' %>">Decided<%= view === 'decided' ? ' (' + total + ')' : '' %></a>
+  </div>
+
+  <% if (!rows.length) { %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-10 text-center">
+    <i data-lucide="inbox" class="w-8 h-8 text-slate-600 mx-auto mb-3"></i>
+    <p class="text-slate-400"><%= view === 'pending' ? 'Nothing waiting for a decision.' : 'No decisions yet.' %></p>
+    <p class="text-xs text-slate-500 mt-1">Recommendations appear here when AI capabilities that make them are switched on (Settings &gt; AI).</p>
+  </div>
+  <% } %>
+
+  <% const STATUS = { accepted: 'emerald', rejected: 'slate', failed: 'rose', expired: 'slate', applying: 'amber' }; %>
+  <% for (const r of rows) { const conf = Number(r.confidence); const cc = conf >= 0.8 ? 'emerald' : conf >= 0.6 ? 'sky' : 'amber'; %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <div class="flex flex-wrap items-center gap-2 mb-3 text-xs">
+      <span class="px-2.5 py-1 rounded-lg bg-white/5 text-slate-300"><%= r.handler_label %></span>
+      <span class="px-2.5 py-1 rounded-lg bg-<%= cc %>-500/10 text-<%= cc %>-400 font-semibold" title="How sure the AI is"><%= conf >= 0.995 ? '>99' : Math.round(conf * 100) %>% confidence</span>
+      <span class="text-slate-500"><%= formatDateTime(r.created_at) %><%= r.site ? ' · ' + r.site : '' %></span>
+      <% if (r.status !== 'pending') { %><span class="px-2.5 py-1 rounded-lg bg-<%= STATUS[r.status] || 'slate' %>-500/10 text-<%= STATUS[r.status] || 'slate' %>-400 font-semibold"><%= r.status %></span><% } %>
+    </div>
+    <div class="font-semibold text-white mb-1"><%= r.title %></div>
+    <% if (r.target_type === 'asset' && r.target_id) { %><a href="<%= hams_url('/assets/' + r.target_id) %>" class="text-xs text-blue-400 hover:text-blue-300">Open asset →</a><% } %>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+      <div>
+        <div class="text-xs text-slate-500 mb-2">Why</div>
+        <ul class="space-y-1.5 text-sm text-slate-300 list-disc pl-5">
+          <% for (const w of (r.why || [])) { %><li><%= w.text %></li><% } %>
+        </ul>
+      </div>
+      <div>
+        <div class="text-xs text-slate-500 mb-2">Proposed change</div>
+        <% const entries = Object.entries(r.proposed || {}).filter(([k]) => !k.startsWith('_')); %>
+        <% if (entries.length) { %>
+        <dl class="text-sm space-y-1">
+          <% for (const [k, v] of entries) { const change = v !== null && typeof v === 'object' && 'to' in v; %>
+          <div class="flex gap-2"><dt class="text-slate-500 min-w-[8rem]"><%= k.replace(/_/g, ' ') %></dt>
+            <dd class="text-white"><% if (change) { %><span class="text-slate-500 line-through"><%= v.from ?? '—' %></span> → <%= v.to ?? '—' %><% } else { %><%= v !== null && typeof v === 'object' ? JSON.stringify(v) : v %><% } %></dd></div>
+          <% } %>
+        </dl>
+        <% } else { %><p class="text-sm text-slate-500">No data change (information only).</p><% } %>
+      </div>
+    </div>
+
+    <% if (r.status === 'pending' && canApprove) { %>
+    <div class="flex flex-wrap items-center gap-2 mt-5 pt-5 border-t border-white/5">
+      <form method="POST" action="<%= hams_url('/ai/approvals/' + r.id + '/decide') %>" class="flex flex-wrap items-center gap-2 flex-1">
+        <%- csrf_field %>
+        <input type="text" name="note" maxlength="1000" placeholder="Note (optional)" class="flex-1 min-w-[12rem] px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white outline-none focus:border-blue-500/50">
+        <button name="decision" value="accept" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium">Accept</button>
+        <button name="decision" value="reject" class="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-sm">Reject</button>
+      </form>
+    </div>
+    <% } else if (r.status !== 'pending') { %>
+    <div class="mt-5 pt-4 border-t border-white/5 text-xs text-slate-500">
+      <%= r.decided_by_name ? 'By ' + r.decided_by_name : '' %><%= r.decided_at ? ' on ' + formatDateTime(r.decided_at) : '' %><%= r.decision_note ? ' · “' + r.decision_note + '”' : '' %>
+      <% if (r.status === 'failed' && r.applied_result && r.applied_result.error) { %><div class="text-rose-400 mt-1">Could not apply: <%= r.applied_result.error %></div><% } %>
+    </div>
+    <% } %>
+  </div>
+  <% } %>
+
+  <% if (paginator.hasPages()) { %><div class="bg-hams-card border border-white/5 rounded-3xl"><%- await include('../components/pagination', { paginator, baseUrl }) %></div><% } %>
+</div>

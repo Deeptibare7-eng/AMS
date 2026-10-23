@@ -1,0 +1,180 @@
+<div x-data="importData(<%= JSON.stringify(jobId) %>)" x-init="start()">
+<div class="flex flex-wrap items-center justify-between gap-4 mb-8">
+  <div>
+    <h1 class="font-heading text-2xl md:text-3xl font-bold text-white">Import Data</h1>
+    <p class="text-sm text-slate-500 mt-1">Upload the Asset Data Excel file — its Computing rows are matched by Service Tag and synced into Hardware, employees, locations, models and procurement</p>
+  </div>
+</div>
+
+<!-- Upload -->
+<div class="bg-hams-card border border-white/5 rounded-3xl p-6 mb-6" x-show="!job || job.state === 'failed' || job.state === 'done'">
+  <form method="POST" action="<%= hams_url('/import-data/analyze') %>" enctype="multipart/form-data" class="flex flex-wrap items-end gap-4">
+    <%- csrf_field %>
+    <div class="flex-1 min-w-[260px]">
+      <label class="block text-xs font-medium text-slate-400 mb-1.5">Asset Data file (.xlsx) *</label>
+      <input type="file" name="file" accept=".xlsx" required class="w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm text-slate-300">
+    </div>
+    <button class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"><i data-lucide="search-check" class="w-4 h-4"></i>Upload &amp; preview changes</button>
+  </form>
+  <ul class="mt-4 text-xs text-slate-500 space-y-1 list-disc pl-5">
+    <li>Same columns as the Asset Data workbook (first sheet). Nothing changes until you review the preview and click <b class="text-slate-300">Apply</b>.</li>
+    <li>Existing records are updated, new ones added; nothing is deleted. Records not in the file stay as they are.</li>
+    <li>Allocations made in the tool (e.g. New Joinee laptops, check-outs, check-ins) are kept until the file shows the same thing; they're listed as conflicts.</li>
+    <li>Only <b class="text-slate-300">Computing</b> rows are imported; Accessories, Servers and rows without an Asset Type are left out, and Intune columns are ignored.</li>
+    <li>Values are taken from the file as written. In Repository shows as In Stock and Allocated as Deployed; each "Retired - …" status keeps its own name. A row with any other status is not imported and is listed in the preview.</li>
+    <li>Asset tags never change, so printed labels stay valid.</li>
+  </ul>
+</div>
+
+<!-- Progress -->
+<div class="bg-hams-card border border-white/5 rounded-3xl p-6 mb-6" x-show="job && (job.state === 'analyzing' || job.state === 'applying')" x-cloak>
+  <div class="flex items-center gap-3 mb-3">
+    <i data-lucide="loader" class="w-5 h-5 text-blue-400 animate-spin"></i>
+    <div class="text-white font-medium" x-text="job && job.state === 'applying' ? 'Applying changes…' : 'Analyzing ' + (job ? job.fileName : '') + '…'"></div>
+  </div>
+  <div class="text-xs text-slate-500 mb-3" x-text="job && job.step"></div>
+  <div class="h-2 rounded-full bg-white/5 overflow-hidden" x-show="job && job.state === 'applying'">
+    <div class="h-full bg-blue-500 transition-all" :style="'width:' + ((job && job.progress) || 2) + '%'"></div>
+  </div>
+  <p class="text-xs text-slate-500 mt-3">A large file takes about a minute. You can keep this page open.</p>
+</div>
+
+<!-- Error -->
+<div x-show="job && job.state === 'failed'" x-cloak class="mb-6 px-5 py-4 rounded-2xl border bg-rose-500/10 border-rose-500/20 text-rose-300 text-sm" x-text="job && job.error"></div>
+<div x-show="loadError" x-cloak class="mb-6 px-5 py-4 rounded-2xl border bg-rose-500/10 border-rose-500/20 text-rose-300 text-sm" x-text="loadError"></div>
+
+<!-- Preview / result -->
+<template x-if="job && (job.state === 'ready' || job.state === 'done') && job.summary">
+  <div class="mb-6">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div>
+        <h2 class="font-heading text-lg font-semibold text-white" x-text="job.state === 'done' ? 'Import applied' : 'Preview — nothing has changed yet'"></h2>
+        <p class="text-xs text-slate-500" x-text="fileText()"></p>
+      </div>
+      <template x-if="job.state === 'ready'">
+        <form method="POST" :action="applyUrl" onsubmit="return confirm('Apply these changes to the database?')" class="flex items-center gap-2">
+          <%- csrf_field %>
+          <a href="<%= hams_url('/import-data') %>" class="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-300">Cancel</a>
+          <span class="text-xs text-slate-500" x-show="!job.summary.added && !job.summary.updated">Nothing to apply — the tool already matches this file.</span>
+          <button class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-600" :disabled="!job.summary.added && !job.summary.updated"><i data-lucide="check" class="w-4 h-4"></i>Apply changes</button>
+        </form>
+      </template>
+      <template x-if="job.state === 'done'">
+        <div class="flex gap-2">
+          <a href="<%= hams_url('/assets') %>" class="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-300">Open Hardware</a>
+          <a href="<%= hams_url('/users') %>" class="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-300">Open Directory</a>
+        </div>
+      </template>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+      <template x-for="card in cards()" :key="card[0]">
+        <div class="bg-hams-card border border-white/5 rounded-2xl p-4">
+          <div class="text-2xl font-bold" :class="card[2]" x-text="num(card[1])"></div>
+          <div class="text-xs text-slate-500 mt-1" x-text="card[0]"></div>
+        </div>
+      </template>
+    </div>
+    <div class="text-xs text-slate-500 mb-6" x-show="newCatalogText()" x-text="'New in the catalog: ' + newCatalogText()"></div>
+    <div class="text-xs text-slate-500 mb-6" x-show="job.summary.notInFileHardware || job.summary.notInFileAccessories"
+         x-text="num(job.summary.notInFileHardware) + ' hardware and ' + num(job.summary.notInFileAccessories) + ' accessory records are in the tool but not in this file — left unchanged.'"></div>
+
+    <template x-for="sec in sections()" :key="sec.key">
+      <div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden mb-4" x-show="job.samples && job.samples[sec.key] && job.samples[sec.key].length">
+        <div class="px-6 pt-5 pb-3"><h3 class="font-heading font-semibold text-white" x-text="sec.title"></h3><p class="text-xs text-slate-500" x-text="sec.note"></p></div>
+        <div class="table-responsive"><table class="w-full text-sm min-w-[640px]">
+          <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5"><template x-for="h in sec.cols"><th class="px-6 py-3" x-text="h[0]"></th></template></tr></thead>
+          <tbody class="divide-y divide-white/5">
+            <template x-for="r in (job.samples ? job.samples[sec.key] : [])">
+              <tr><template x-for="h in sec.cols"><td class="px-6 py-2.5 text-slate-300" x-text="r[h[1]] || '—'"></td></template></tr>
+            </template>
+          </tbody>
+        </table></div>
+      </div>
+    </template>
+  </div>
+</template>
+
+<!-- History -->
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+  <div class="px-6 pt-5 pb-3"><h3 class="font-heading font-semibold text-white">Import history</h3></div>
+  <div class="table-responsive"><table class="w-full text-sm min-w-[720px]">
+    <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
+      <th class="px-6 py-3">When</th><th class="px-6 py-3">File</th><th class="px-6 py-3">By</th><th class="px-6 py-3">Added</th><th class="px-6 py-3">Updated</th><th class="px-6 py-3">Allocation changes</th><th class="px-6 py-3">Protected</th>
+    </tr></thead>
+    <tbody class="divide-y divide-white/5">
+      <% for (const h of history) { const a = h.info && h.info.applied; %>
+      <tr>
+        <td class="px-6 py-2.5 text-slate-400"><%= formatDateTime(h.created_at) %></td>
+        <td class="px-6 py-2.5 text-slate-300"><%= h.info && h.info.file ? h.info.file : (h.type === 'assets' ? 'Full import (command line)' : '—') %></td>
+        <td class="px-6 py-2.5 text-slate-400"><%= h.by_name || '—' %></td>
+        <td class="px-6 py-2.5 text-slate-300"><%= a ? a.added : (h.type === 'assets' ? h.rows_imported : '—') %></td>
+        <td class="px-6 py-2.5 text-slate-300"><%= a ? a.updated : '—' %></td>
+        <td class="px-6 py-2.5 text-slate-300"><%= a ? `${a.assigned} assigned · ${a.returned} returned · ${a.reassigned} moved` : '—' %></td>
+        <td class="px-6 py-2.5 text-slate-300"><%= a ? a.conflicts : '—' %></td>
+      </tr>
+      <% } %>
+      <% if (!history.length) { %><tr><td colspan="7" class="px-6 py-10 text-center text-slate-500">No imports yet.</td></tr><% } %>
+    </tbody>
+  </table></div>
+</div>
+</div>
+
+<script>
+function importData(jobId) {
+  var base = <%- safeJson(hams_url('/import-data/jobs/')) %>;
+  return {
+    jobId: jobId, job: null, loadError: '', timer: null,
+    get applyUrl() { return base + encodeURIComponent(this.jobId) + '/apply'; },
+    num: function (n) { return Number(n || 0).toLocaleString('en-IN'); },
+    async start() { if (this.jobId) await this.poll(); },
+    async poll() {
+      try {
+        var r = await fetch(base + encodeURIComponent(this.jobId), { headers: { Accept: 'application/json' } });
+        var j = await r.json();
+        if (!j.ok) { this.loadError = j.message; this.job = null; return; }
+        this.job = j.job;
+        if (this.job.state === 'analyzing' || this.job.state === 'applying') { var self = this; this.timer = setTimeout(function () { self.poll(); }, 1500); }
+        else if (this.job.state === 'done') { /* result shown below */ }
+        this.$nextTick(function () { if (window.lucide) lucide.createIcons(); });
+      } catch (e) { this.loadError = 'Lost contact with the server. Refresh the page.'; }
+    },
+    cards: function () {
+      var s = this.job.summary, a = s.applied;
+      return [
+        ['New records', a ? a.added : s.added, 'text-emerald-400'],
+        ['Updated records', a ? a.updated : s.updated, 'text-blue-400'],
+        ['Unchanged', s.unchanged, 'text-slate-300'],
+        ['New employees', s.newEmployees, 'text-indigo-400'],
+        ['Assigned', a ? a.assigned : s.assigned, 'text-emerald-400'],
+        ['Returned to stock', a ? a.returned : s.returned, 'text-amber-400'],
+        ['Moved to another employee', a ? a.reassigned : s.reassigned, 'text-blue-400'],
+        ['Protected (kept tool allocation)', s.conflicts, s.conflicts ? 'text-rose-400' : 'text-slate-300']
+      ];
+    },
+    // "file.xlsx · 42,576 rows · 26,736 Computing rows imported · left out: Accessories 15,018, Servers 822"
+    fileText: function () {
+      var s = this.job.summary, num = this.num, out = [];
+      Object.keys(s.excluded || {}).forEach(function (k) { out.push(k + ' ' + num(s.excluded[k])); });
+      if (s.skipped) out.push('no Asset Type ' + num(s.skipped));
+      Object.keys(s.unknownStatus || {}).forEach(function (k) { out.push('unknown status "' + k + '" ' + num(s.unknownStatus[k])); });
+      return this.job.fileName + ' · ' + num(s.rows) + ' rows · ' + num(s.register) + ' Computing rows imported' + (out.length ? ' · left out: ' + out.join(', ') : '');
+    },
+    newCatalogText: function () {
+      var n = this.job.summary.newCatalog || {}, parts = [];
+      [['locations', 'location', 'locations'], ['categories', 'category', 'categories'], ['manufacturers', 'manufacturer', 'manufacturers'], ['models', 'model', 'models'],
+       ['suppliers', 'vendor', 'vendors'], ['pos', 'purchase order', 'purchase orders'], ['labels', 'status', 'statuses']]
+        .forEach(function (x) { if (n[x[0]]) parts.push(n[x[0]] + ' ' + (n[x[0]] > 1 ? x[2] : x[1])); });
+      return parts.join(', ');
+    },
+    sections: function () {
+      return [
+        { key: 'conflicts', title: 'Protected — kept as allocated in the tool', note: 'The file disagrees with an allocation or return made in the tool. The tool\'s version is kept until the file shows the same thing.', cols: [['Asset', 'tag'], ['Name', 'name'], ['File says', 'file'], ['Tool', 'tool']] },
+        { key: 'allocation', title: 'Allocation changes (examples)', note: 'Who holds what will change as shown.', cols: [['Asset', 'tag'], ['Name', 'name'], ['Change', 'change'], ['To (CTID)', 'to'], ['New status', 'status']] },
+        { key: 'updated', title: 'Updated details (examples)', note: 'Fields that differ from the tool.', cols: [['Asset', 'tag'], ['Name', 'name'], ['Fields', 'fields']] },
+        { key: 'added', title: 'New records (examples)', note: 'Service tags not yet in the tool.', cols: [['Service tag', 'tag'], ['Name', 'name'], ['Type', 'type'], ['Status', 'status']] }
+      ];
+    }
+  };
+}
+</script>

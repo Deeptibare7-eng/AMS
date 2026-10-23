@@ -1,0 +1,148 @@
+<%
+  const n = v => Math.round(Number(v || 0)).toLocaleString('en-IN');
+  const t = plan.totals;
+  const pct = v => (v >= 0.995 ? '>99%' : Math.round(v * 100) + '%');
+  const cats = Object.keys(plan.unit_costs).filter(c => c !== 'VM' && c !== 'VM Server').sort();
+%>
+<div class="space-y-6">
+  <div>
+    <h1 class="font-heading text-2xl md:text-3xl font-bold text-white mb-1">Refresh Planning</h1>
+    <p class="text-sm text-slate-500">Enter a budget: the AI picks which assets to replace first, by their chance of being retired soon per rupee (0/1 knapsack). It only recommends: nothing is bought or changed.</p>
+  </div>
+
+  <% if (!plan.candidates && !opts.budget) { %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-10 text-center text-slate-400">No refresh-risk scores yet. They are computed tonight (job "Refresh risk scores") or with Run now on Settings &gt; AI.</div>
+  <% } %>
+
+  <form method="GET" action="<%= hams_url('/ai/planning') %>" class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <label class="block">
+        <span class="text-xs text-slate-500">Budget (<%= plan.currency.code %>)</span>
+        <input type="text" name="budget" inputmode="numeric" value="<%= opts.budget ? opts.budget : Math.round(t.expected_cost / 100000) * 100000 %>"
+               class="mt-1 w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm">
+        <span class="text-[11px] text-slate-500">Replacing every expected retirement in the horizon: about <%= money(t.expected_cost) %></span>
+      </label>
+      <label class="block">
+        <span class="text-xs text-slate-500">Horizon</span>
+        <select name="horizon" class="mt-1 w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm">
+          <% for (const h of [6, 12, 24]) { %><option value="<%= h %>" <%= opts.horizon === h ? 'selected' : '' %>>Next <%= h %> months</option><% } %>
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs text-slate-500">Asset Location</span>
+        <select name="location" class="mt-1 w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm">
+          <option value="">All my locations</option>
+          <% for (const l of locations) { %><option value="<%= l.id %>" <%= opts.locations.includes(l.id) ? 'selected' : '' %>><%= l.name %></option><% } %>
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs text-slate-500">Category</span>
+        <select name="category" class="mt-1 w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm">
+          <option value="">All scored categories</option>
+          <% for (const c of cats) { %><option value="<%= c %>" <%= opts.categories.includes(c) ? 'selected' : '' %>><%= c %></option><% } %>
+        </select>
+      </label>
+    </div>
+    <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <% for (const c of cats) { const u = plan.unit_costs[c]; %>
+      <label class="block">
+        <span class="text-xs text-slate-500">Replacement cost: <%= c %></span>
+        <input type="text" name="cost_<%= c %>" inputmode="numeric" value="<%= Math.round(u.used) %>" class="mt-1 w-full px-4 py-2 rounded-xl bg-hams-bg border border-white/10 text-sm">
+        <span class="text-[11px] text-slate-500"><%= u.basis %></span>
+      </label>
+      <% } %>
+    </div>
+    <div class="mt-4 flex flex-wrap items-center gap-4">
+      <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="stock" value="1" <%= opts.stock ? 'checked' : '' %> class="rounded">Include spare stock (counted half: replacing a spare is less urgent)</label>
+      <button class="ml-auto flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"><i data-lucide="calculator" class="w-4 h-4"></i>Make the plan</button>
+    </div>
+  </form>
+
+  <% if (opts.budget) { %>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="bg-hams-card border border-white/5 rounded-2xl p-5">
+      <div class="text-xs text-slate-500">Assets to replace</div>
+      <div class="text-3xl font-bold font-heading text-white mt-1"><%= n(t.assets) %></div>
+      <div class="text-[11px] text-slate-500 mt-1">of <%= n(plan.candidates) %> candidates</div>
+    </div>
+    <div class="bg-hams-card border border-white/5 rounded-2xl p-5">
+      <div class="text-xs text-slate-500">Cost</div>
+      <div class="text-3xl font-bold font-heading text-white mt-1"><%= money(t.cost) %></div>
+      <div class="text-[11px] text-slate-500 mt-1"><%= money(t.left) %> of <%= money(t.budget) %> left</div>
+    </div>
+    <div class="bg-hams-card border border-white/5 rounded-2xl p-5">
+      <div class="text-xs text-slate-500">Expected retirements covered</div>
+      <div class="text-3xl font-bold font-heading text-white mt-1">~<%= n(t.expected_covered) %></div>
+      <div class="text-[11px] text-slate-500 mt-1">of ~<%= n(t.expected_all) %> expected in <%= opts.horizon %> months (<%= t.expected_all ? pct(t.expected_covered / t.expected_all) : '0%' %>)</div>
+    </div>
+    <div class="bg-hams-card border border-white/5 rounded-2xl p-5">
+      <div class="text-xs text-slate-500">In-use assets at 50%+ risk left out</div>
+      <div class="text-3xl font-bold font-heading <%= t.high_risk_left ? 'text-amber-400' : 'text-emerald-400' %> mt-1"><%= n(t.high_risk_left) %></div>
+      <div class="text-[11px] text-slate-500 mt-1">covering all <%= n(t.high_risk_in_use) %> would cost <%= money(t.budget_for_all_high) %></div>
+    </div>
+  </div>
+
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div>
+        <h2 class="font-heading font-semibold text-white">How it was chosen</h2>
+        <p class="text-xs text-slate-500 mt-1">Priority = chance of being retired within <%= opts.horizon %> months (in-use assets in full<%= opts.stock ? ', spare stock half' : '' %>). The plan with the most priority within the budget:
+          <%= plan.method === 'optimal' ? 'dynamic programming over the budget' : 'best priority per rupee first' %> (priority <%= plan.optimal_value.toFixed(1) %> vs <%= plan.greedy_value.toFixed(1) %> for simply taking the best ratio first).
+          Average confidence of the risk scores used: <%= pct(t.confidence) %>.</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <a href="<%= exportUrl %>" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-sm"><i data-lucide="file-spreadsheet" class="w-4 h-4"></i>Excel</a>
+        <% if (canPropose && t.assets) { %>
+        <form method="POST" action="<%= hams_url('/ai/planning/propose') %>">
+          <%- csrf_field %>
+          <input type="hidden" name="budget" value="<%= opts.budget %>"><input type="hidden" name="horizon" value="<%= opts.horizon %>">
+          <% if (opts.stock) { %><input type="hidden" name="stock" value="1"><% } %>
+          <% for (const l of opts.locations) { %><input type="hidden" name="location" value="<%= l %>"><% } %>
+          <% for (const c of opts.categories) { %><input type="hidden" name="category" value="<%= c %>"><% } %>
+          <% for (const [c, v] of Object.entries(opts.costs)) { %><input type="hidden" name="cost_<%= c %>" value="<%= v %>"><% } %>
+          <button class="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm"><i data-lucide="send" class="w-4 h-4"></i>Send for approval</button>
+        </form>
+        <% } %>
+      </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+      <div>
+        <div class="text-xs text-slate-500 mb-2">By category</div>
+        <% for (const g of plan.by_category) { %><div class="flex justify-between py-1 border-b border-white/5"><span class="text-slate-300"><%= g.key %></span><span class="text-slate-400"><%= n(g.n) %> · <%= money(g.cost) %></span></div><% } %>
+      </div>
+      <div>
+        <div class="text-xs text-slate-500 mb-2">By Asset Location</div>
+        <% for (const g of plan.by_location.slice(0, 8)) { %><div class="flex justify-between py-1 border-b border-white/5"><span class="text-slate-300"><%= g.key %></span><span class="text-slate-400"><%= n(g.n) %> · <%= money(g.cost) %></span></div><% } %>
+      </div>
+    </div>
+    <% if (plan.no_cost.length) { %><p class="text-[11px] text-amber-300/80 mt-3">No replacement cost known for <%= plan.no_cost.join(', ') %>: enter one above to include them.</p><% } %>
+  </div>
+
+  <div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+    <div class="px-6 pt-6 pb-3 flex items-center justify-between">
+      <h2 class="font-heading font-semibold text-white">Assets in the plan</h2>
+      <span class="text-xs text-slate-500"><%= plan.chosen.length > shown ? 'First ' + shown + ' of ' + n(plan.chosen.length) + ' (all in the Excel file)' : n(plan.chosen.length) + ' assets' %>, highest priority first</span>
+    </div>
+    <div class="table-responsive">
+      <table class="w-full min-w-[900px] text-sm">
+        <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
+          <th class="px-6 py-3">Asset</th><th class="px-6 py-3">Category / model</th><th class="px-6 py-3">Asset Location</th><th class="px-6 py-3">Risk</th><th class="px-6 py-3">Cost</th><th class="px-6 py-3">Why</th>
+        </tr></thead>
+        <tbody class="divide-y divide-white/5">
+          <% for (const c of plan.chosen.slice(0, shown)) { %>
+          <tr>
+            <td class="px-6 py-3"><a href="<%= hams_url('/assets/' + c.id) %>" class="text-white hover:text-blue-400"><%= c.name %></a><div class="text-xs font-mono text-slate-500"><%= c.tag %></div></td>
+            <td class="px-6 py-3 text-slate-400"><%= c.category %><div class="text-xs text-slate-500"><%= c.model || '' %></div></td>
+            <td class="px-6 py-3 text-slate-400"><%= c.location || '—' %></td>
+            <td class="px-6 py-3"><span class="px-2 py-0.5 rounded-lg text-xs font-semibold <%= c.risk >= 0.5 ? 'bg-rose-500/10 text-rose-400' : c.risk >= 0.2 ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400' %>"><%= pct(c.risk) %></span></td>
+            <td class="px-6 py-3 text-slate-300"><%= money(c.cost) %></td>
+            <td class="px-6 py-3 text-xs text-slate-400"><%= c.why %></td>
+          </tr>
+          <% } %>
+          <% if (!plan.chosen.length) { %><tr><td colspan="6" class="px-6 py-10 text-center text-slate-500">Nothing fits: raise the budget or widen the filters.</td></tr><% } %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <% } %>
+</div>

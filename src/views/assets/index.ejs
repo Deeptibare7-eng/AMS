@@ -1,0 +1,217 @@
+<div x-data="{ selected: [], selectAll: false }"
+     x-effect="if (selectAll) { selected = <%= JSON.stringify(assets.map(a => String(a.id))) %> } ">
+<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+  <div>
+    <h1 class="font-heading text-2xl md:text-3xl font-bold text-white">Hardware Assets</h1>
+    <p class="text-sm text-slate-500 mt-1">Full lifecycle registry of enterprise hardware</p>
+  </div>
+  <a href="<%= hams_url('/assets/create') %>" class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium">
+    <i data-lucide="plus" class="w-4 h-4"></i>Add Asset
+  </a>
+</div>
+
+<% if (typeof canAssign !== 'undefined' && canAssign) { %>
+<!-- Quick assign: in-stock asset -> user (same checkout logic as the asset page) -->
+<div class="bg-hams-card border border-white/5 rounded-3xl p-6 mb-6">
+  <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+    <div class="flex items-center gap-3">
+      <span class="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center"><i data-lucide="user-plus" class="w-4 h-4"></i></span>
+      <div>
+        <h2 class="font-heading font-semibold text-white">Assign In-Stock Asset</h2>
+        <p class="text-xs text-slate-500"><%= (inStockCount || 0).toLocaleString('en-IN') %> assets in stock and ready to assign</p>
+      </div>
+    </div>
+  </div>
+  <form method="POST" action="<%= hams_url('/assets/quick-assign') %>" class="grid grid-cols-1 md:grid-cols-12 gap-4 items-end"
+        onsubmit="return confirm('Assign the selected asset to the selected user?')">
+    <%- csrf_field %>
+    <div class="md:col-span-5">
+      <label class="block text-xs font-medium text-slate-400 mb-1.5">In-stock asset *</label>
+      <%- await include('../components/picker', { name: 'asset_id', source: 'instock-assets', required: true, placeholder: 'Type name, asset tag or serial…' }) %>
+    </div>
+    <div class="md:col-span-4">
+      <label class="block text-xs font-medium text-slate-400 mb-1.5">Assign to *</label>
+      <%- await include('../components/picker', { name: 'user_id', source: 'users', required: true, placeholder: 'Type a name, email or CTID…' }) %>
+    </div>
+    <div class="md:col-span-2">
+      <label class="block text-xs font-medium text-slate-400 mb-1.5">Notes</label>
+      <input type="text" name="checkout_notes" maxlength="500" placeholder="Optional" class="w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm outline-none focus:border-blue-500">
+    </div>
+    <div class="md:col-span-1">
+      <button class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium"><i data-lucide="check" class="w-4 h-4"></i>Assign</button>
+    </div>
+  </form>
+</div>
+<% } %>
+
+<% if (fromDashboard || shownFilters.length) { %>
+<!-- Dashboard drill-down: the way back, and drill-down filters that have no dropdown below -->
+<div class="flex flex-wrap items-center gap-3 mb-4 px-4 py-3 rounded-2xl bg-blue-500/10 border border-blue-500/20">
+  <% if (fromDashboard) { %>
+  <a href="<%= hams_url('/') %>" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-medium"><i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>Back to Dashboard</a>
+  <% } %>
+  <% if (shownFilters.length) { %>
+  <div class="text-sm text-blue-200">Also limited to: <%= shownFilters.join(' · ') %></div>
+  <a href="<%= hams_url('/assets') %>" class="ml-auto text-xs text-blue-300 hover:underline">Show all hardware</a>
+  <% } %>
+</div>
+<% } %>
+
+<!-- Bulk action bar -->
+<div x-show="selected.length > 0" x-cloak class="mb-4 flex flex-wrap items-center gap-3 bg-hams-card border border-blue-500/20 rounded-2xl px-5 py-3">
+  <span class="text-sm text-blue-400 font-medium" x-text="selected.length + ' asset(s) selected'"></span>
+  <form method="GET" action="<%= hams_url('/assets/labels') %>" class="flex items-center">
+    <template x-for="id in selected" :key="'l' + id"><input type="hidden" name="ids[]" :value="id"></template>
+    <button class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs"><i data-lucide="printer" class="w-3.5 h-3.5"></i>Labels</button>
+  </form>
+  <form method="POST" action="<%= hams_url('/assets/bulk-update') %>" class="flex items-center gap-2">
+    <%- csrf_field %>
+    <template x-for="id in selected" :key="'u' + id"><input type="hidden" name="ids[]" :value="id"></template>
+    <select name="status_label_id" class="px-3 py-1.5 rounded-lg text-xs bg-hams-bg border border-white/10">
+      <option value="">Update Status&hellip;</option>
+      <% for (const sl of references.status_labels) { %><option value="<%= sl.id %>"><%= sl.name %></option><% } %>
+    </select>
+    <button class="px-3 py-1.5 rounded-lg bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 text-xs">Apply</button>
+  </form>
+  <form method="POST" action="<%= hams_url('/assets/bulk-delete') %>" data-confirm="Delete the selected assets?">
+    <%- csrf_field %>
+    <template x-for="id in selected" :key="'d' + id"><input type="hidden" name="ids[]" :value="id"></template>
+    <button class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 text-xs"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i>Delete</button>
+  </form>
+</div>
+
+<!-- Filters (same layout as Asset Models): tick one or more values in each, then Apply Filter -->
+<% const fmt = n => Number(n || 0).toLocaleString('en-IN'); %>
+<form method="GET" action="<%= hams_url('/assets') %>" class="bg-hams-card border border-white/5 rounded-3xl p-5 mb-6">
+  <% for (const [k, v] of Object.entries(extraParams)) { for (const x of [].concat(v)) { %><input type="hidden" name="<%= k %>" value="<%= x %>"><% } } %>
+  <div class="flex flex-wrap items-center gap-3">
+    <% if (aiOn.has('nl')) { %>
+    <%# Ask mode (questions in plain language): the same box sends ?ask= instead of ?search=. %>
+    <div class="relative flex-1 min-w-[260px] sm:min-w-[400px] max-w-2xl flex items-center gap-2" x-data="{ ask: <%= filters.asked ? 'true' : 'false' %> }">
+      <div class="relative flex-1">
+        <i data-lucide="search" class="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
+        <input type="text" :name="ask ? 'ask' : 'search'" value="<%= filters.asked || filters.search %>"
+               :placeholder="ask ? 'Ask: laptops in Pune with warranty expiring next month' : '<%= aiOn.has('search') ? 'Search tag, serial, host, CTID, model, site...' : 'Search name, tag or serial...' %>'"
+               class="w-full pl-11 pr-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm outline-none focus:border-blue-500">
+      </div>
+      <div class="flex rounded-xl overflow-hidden border border-white/10 text-xs shrink-0" role="group" aria-label="Search or ask">
+        <button type="button" @click="ask = false" class="px-3 py-2" :class="ask ? 'text-slate-400 hover:bg-white/5' : 'bg-white/10 text-white'">Search</button>
+        <button type="button" @click="ask = true" class="px-3 py-2 flex items-center gap-1" :class="ask ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-white/5'"><i data-lucide="message-circle-question" class="w-3.5 h-3.5"></i>Ask</button>
+      </div>
+    </div>
+    <% } else { %>
+    <div class="relative flex-1 min-w-[200px] max-w-xs">
+      <i data-lucide="search" class="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
+      <input type="text" name="search" value="<%= filters.search %>" placeholder="<%= aiOn.has('search') ? 'Search tag, serial, host, CTID, model, site...' : 'Search name, tag or serial...' %>"
+             class="w-full pl-11 pr-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm outline-none focus:border-blue-500">
+    </div>
+    <% } %>
+    <% for (const s of selects) { %>
+    <%- await include('../components/multi-select', { name: s.key, placeholder: s.any, noun: s.noun, title: s.title, options: s.options, selected: filters[s.key] }) %>
+    <% } %>
+  </div>
+  <p class="text-[11px] text-slate-500 mt-3"><b class="text-slate-400">Location</b> is where the device sits, read from Machine Name (e.g. "MS IT STOCK…" = Mindspace). <b class="text-slate-400">Asset Location</b> is the register's purchase location.</p>
+  <div class="flex items-center gap-3 mt-4">
+    <button class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"><i data-lucide="filter" class="w-4 h-4"></i>Apply Filter</button>
+    <a href="<%= hams_url('/assets') %>" class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-sm"><i data-lucide="rotate-ccw" class="w-4 h-4"></i>Reset</a>
+  </div>
+</form>
+
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+  <div class="bg-hams-card border border-white/5 rounded-2xl p-5">
+    <div class="text-xs text-slate-500">Assets matched</div>
+    <div class="text-3xl font-bold font-heading text-white mt-1"><%= fmt(cards.matched) %></div>
+  </div>
+  <div class="bg-hams-card border border-emerald-500/25 rounded-2xl p-5">
+    <div class="text-xs text-slate-500">In stock</div>
+    <div class="text-3xl font-bold font-heading text-emerald-400 mt-1"><%= fmt(cards.in_stock) %></div>
+    <% if (cards.returned_to_client) { %><div class="text-[11px] text-amber-400/80 mt-1"><%= fmt(cards.returned_to_client) %> of these say "Returned to client" in Machine Name</div><% } %>
+  </div>
+  <div class="bg-hams-card border border-white/5 rounded-2xl p-5">
+    <div class="text-xs text-slate-500">Allocated</div>
+    <div class="text-3xl font-bold font-heading text-white mt-1"><%= fmt(cards.allocated) %></div>
+    <% if (filters.site.length) { %><div class="text-[11px] text-slate-500 mt-1">Allocated devices show the user's computer name in Machine Name, so they have no Location — use Asset Location to split them.</div><% } %>
+  </div>
+  <div class="bg-hams-card border border-white/5 rounded-2xl p-5">
+    <div class="text-xs text-slate-500">Retired</div>
+    <div class="text-3xl font-bold font-heading text-white mt-1"><%= fmt(cards.retired) %></div>
+  </div>
+</div>
+<p class="mb-6 px-1 text-sm text-slate-300 leading-relaxed">
+  <% if (statement) { %>
+  <%= statement.lead %> <b class="text-white text-base"><%= total === 0 ? 'no' : fmt(total) %></b> <%= statement.rest %><span class="text-slate-500"> — out of <%= fmt(inventoryTotal) %> in inventory.</span>
+  <% } else { %>
+  <b class="text-white text-base"><%= fmt(total) %></b> assets in inventory. <span class="text-slate-500">Choose filters above and click Apply Filter.</span>
+  <% } %>
+</p>
+<% if (smartSearch) { %>
+<%- await include('../ai/_search_banner', { banner: smartSearch.banner }) %>
+<% } %>
+<% if (askBanner) { %>
+<%- await include('../ai/_ask_banner', { askBanner }) %>
+<% } %>
+
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+  <div class="table-responsive">
+    <table class="w-full min-w-[1000px] text-sm">
+      <thead>
+        <tr class="text-left text-xs text-slate-500 uppercase tracking-wider border-b border-white/5">
+          <th class="px-6 py-4 w-10"><input type="checkbox" x-model="selectAll" class="rounded"></th>
+          <th class="px-6 py-4">Asset</th>
+          <th class="px-6 py-4">Category</th>
+          <th class="px-6 py-4">Status</th>
+          <th class="px-6 py-4">Asset Location / Location</th>
+          <th class="px-6 py-4">Assigned To</th>
+          <th class="px-6 py-4 text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-white/5">
+        <% for (const a of assets) { %>
+        <tr class="hover:bg-white/[.02]">
+          <td class="px-6 py-4"><input type="checkbox" value="<%= a.id %>" x-model="selected" class="rounded"></td>
+          <td class="px-6 py-4">
+            <div class="flex items-center gap-3">
+              <span class="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center"><i data-lucide="laptop" class="w-4 h-4"></i></span>
+              <div class="min-w-0">
+                <a href="<%= hams_url('/assets/' + a.id) %>" class="font-medium text-white hover:text-blue-400 truncate block"><%= a.name %></a>
+                <div class="text-xs text-slate-500 font-mono"><%= a.asset_tag %><%= a.serial_number ? ' · ' + a.serial_number : '' %></div>
+                <% if (smartSearch && smartSearch.why[a.id]) { %><%- await include('../ai/_search_why', { why: smartSearch.why[a.id] }) %><% } %>
+              </div>
+            </div>
+          </td>
+          <td class="px-6 py-4"><span class="px-2.5 py-1 rounded-lg bg-white/5 text-xs"><%= a.category_name || a.category || '—' %></span></td>
+          <td class="px-6 py-4">
+            <span class="px-2.5 py-1 rounded-lg text-xs font-medium"
+                  style="background: <%= (a.status_label_color || '#3b82f6') %>22; color: <%= a.status_label_color || '#3b82f6' %>;">
+              <%= a.status_label_name || a.status %>
+            </span>
+          </td>
+          <td class="px-6 py-4 text-slate-400"><%= a.location_name || '—' %>
+            <% if (a.stock_site && a.stock_site !== '_none') { %>
+            <div class="text-[11px] mt-0.5 <%= a.stock_site.startsWith('_') ? 'text-amber-400/80' : 'text-slate-500' %>"><%= a.stock_site.startsWith('_') ? siteLabel(a.stock_site) : 'Location: ' + a.stock_site %></div>
+            <% } %>
+          </td>
+          <td class="px-6 py-4"><%= a.assigned_to_name ? a.assigned_to_name : '' %><% if (!a.assigned_to_name) { %><span class="italic text-slate-600">Unassigned</span><% } %></td>
+          <td class="px-6 py-4">
+            <div class="flex items-center justify-end gap-1">
+              <a href="<%= hams_url('/assets/' + a.id) %>" class="p-2 rounded-lg hover:bg-white/5 text-slate-400" title="View"><i data-lucide="eye" class="w-4 h-4"></i></a>
+              <a href="<%= hams_url('/assets/' + a.id + '/edit') %>" class="p-2 rounded-lg hover:bg-white/5 text-slate-400" title="Edit"><i data-lucide="edit-3" class="w-4 h-4"></i></a>
+              <a href="<%= hams_url('/assets/labels') %>?ids[]=<%= a.id %>" class="p-2 rounded-lg hover:bg-white/5 text-slate-400" title="Print label"><i data-lucide="qr-code" class="w-4 h-4"></i></a>
+              <a href="<%= hams_url('/timeline/assets/' + a.id) %>" class="p-2 rounded-lg hover:bg-white/5 text-slate-400" title="Timeline"><i data-lucide="activity" class="w-4 h-4"></i></a>
+              <form method="POST" action="<%= hams_url('/assets/' + a.id + '/delete') %>" data-confirm="Delete asset <%= e(a.name) %>?">
+                <%- csrf_field %>
+                <button class="p-2 rounded-lg hover:bg-rose-500/10 text-rose-400" title="Delete"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        <% } %>
+        <% if (!assets.length) { %>
+        <tr><td colspan="7" class="px-6 py-16 text-center text-slate-500">No assets found. <a href="<%= hams_url('/assets/create') %>" class="text-blue-400 hover:underline">Register the first asset</a>.</td></tr>
+        <% } %>
+      </tbody>
+    </table>
+  </div>
+  <%- await include('../components/pagination', { paginator, baseUrl }) %>
+</div>
+</div>

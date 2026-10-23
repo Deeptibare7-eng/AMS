@@ -1,0 +1,48 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run IT-HAMS (port from .env, default 3002)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/server.js",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "serverReadyAction": {
+        "pattern": "running at (https?://\\S+)",
+        "uriFormat": "%s",
+        "action": "openExternally"
+      },
+      "preLaunchTask": "Build CSS"
+    },
+    {
+      "name": "Run IT-HAMS + heartbeat monitor",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/server.js",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "HEARTBEAT_ENABLED": "1"
+      },
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "preLaunchTask": "Build CSS"
+    },
+    {
+      "name": "Run tests",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": [
+        "--test",
+        "tests/heartbeat.test.js"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ]
+}

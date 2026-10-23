@@ -1,0 +1,22 @@
+<%#
+  Type-to-search picker; posts the chosen id under `name`, like the <select> it replaces.
+  Locals: name, source ('users' | 'assets' | 'requestable-assets'), required (bool), placeholder,
+          endpoint (optional: a full search URL returning { results: [{ id, label }] } instead of source)
+%>
+<div class="relative" x-data="hamsPicker(<%= JSON.stringify(typeof endpoint !== 'undefined' && endpoint ? endpoint : hams_url('/api/pick/' + source)) %>, <%= required ? 'true' : 'false' %>)" @click.outside="open = false">
+  <input type="hidden" name="<%= name %>" :value="id">
+  <input type="text" x-ref="text" x-model="q" autocomplete="off" <%= required ? 'required' : '' %>
+         @input.debounce.250ms="search()" @focus="open = true; if (!results.length) search()"
+         @keydown.arrow-down.prevent="move(1)" @keydown.arrow-up.prevent="move(-1)" @keydown.enter="if (open && results[active]) { $event.preventDefault(); choose(results[active]); }"
+         placeholder="<%= typeof placeholder !== 'undefined' && placeholder ? placeholder : 'Type to search…' %>"
+         class="w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm outline-none focus:border-blue-500">
+  <div x-show="open && (results.length || loading || q)" x-cloak
+       class="absolute z-[120] mt-1 w-full max-h-64 overflow-y-auto rounded-xl bg-hams-card border border-white/10 shadow-xl text-sm">
+    <template x-for="(r, i) in results" :key="r.id">
+      <button type="button" @click="choose(r)" :class="i === active ? 'bg-white/10' : ''"
+              class="block w-full text-left px-4 py-2 text-slate-300 hover:bg-white/5" x-text="r.label"></button>
+    </template>
+    <div x-show="loading" class="px-4 py-2 text-slate-500">Searching…</div>
+    <div x-show="!loading && !results.length && q" class="px-4 py-2 text-slate-500">No matches</div>
+  </div>
+</div>

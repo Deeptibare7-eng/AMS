@@ -1,0 +1,219 @@
+<div class="flex flex-col lg:flex-row gap-8">
+  <%- await include('_sidebar', { active_tab }) %>
+  <div class="flex-1 space-y-6">
+    <div>
+      <h1 class="font-heading text-2xl font-bold text-white mb-1">AI</h1>
+      <p class="text-sm text-slate-500">In-house AI that runs on this server, with no external AI service or API key. It only recommends: every change waits for a person in AI Approvals.</p>
+    </div>
+
+    <% if (!installed) { %>
+    <div class="bg-hams-card border border-amber-500/20 rounded-3xl p-6">
+      <div class="flex items-start gap-4">
+        <span class="w-10 h-10 shrink-0 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center"><i data-lucide="database" class="w-5 h-5"></i></span>
+        <div>
+          <div class="font-semibold text-white mb-1">AI tables are not installed</div>
+          <p class="text-sm text-slate-400">Run <code class="px-1.5 py-0.5 rounded bg-white/5 text-slate-300">node bin/hams-cli.js migrate</code> to add them. It only adds new <code class="text-slate-300">ai_*</code> tables and leaves existing data unchanged. To undo: <code class="px-1.5 py-0.5 rounded bg-white/5 text-slate-300">node bin/hams-cli.js migrate:rollback ai.sql</code>.</p>
+        </div>
+      </div>
+    </div>
+    <% } else { %>
+
+    <div class="bg-hams-card border border-white/5 rounded-3xl p-6 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-start gap-4">
+        <span class="w-10 h-10 shrink-0 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center"><i data-lucide="sparkles" class="w-5 h-5"></i></span>
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="font-semibold text-white">AI master switch</span>
+            <span class="px-2.5 py-1 rounded-lg text-xs font-semibold <%= master ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-500/10 text-slate-500' %>"><%= master ? 'On' : 'Off' %></span>
+          </div>
+          <p class="text-xs text-slate-500">Off: no AI feature runs and the AI Approvals page is hidden. On: only the capabilities switched on below run.</p>
+        </div>
+      </div>
+      <form method="POST" action="<%= hams_url('/settings/ai/master') %>">
+        <%- csrf_field %><input type="hidden" name="on" value="<%= master ? '0' : '1' %>">
+        <button class="px-4 py-2 rounded-xl text-xs font-medium <%= master ? 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' %>"><%= master ? 'Switch AI off' : 'Switch AI on' %></button>
+      </form>
+    </div>
+
+    <div>
+      <h2 class="font-heading font-semibold text-white mb-3">Capabilities</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <% for (const c of capabilities) { %>
+        <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+          <div class="flex items-start justify-between mb-3">
+            <span class="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center"><i data-lucide="<%= c.icon %>" class="w-5 h-5"></i></span>
+            <% if (c.effective) { %><span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-400">On</span>
+            <% } else if (c.switch) { %><span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-400" title="Its switch is on, but the AI master switch is off">Waiting for master switch</span>
+            <% } else { %><span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-500/10 text-slate-500">Off</span><% } %>
+          </div>
+          <div class="font-semibold text-white mb-2"><%= c.label %></div>
+          <p class="text-xs text-slate-500 mb-4"><%= c.description %></p>
+          <% if (c.key === 'search' && c.effective) { %>
+          <p class="text-xs text-slate-400 mb-4">
+            <% if (searchIndex.ready) { %>Index: <%= Number(searchIndex.assets).toLocaleString('en-IN') %> assets, <%= Number(searchIndex.words).toLocaleString('en-IN') %> words, built <%= formatDateTime(searchIndex.built_at) %> in <%= (searchIndex.build_ms / 1000).toFixed(1) %> s<%= searchIndex.changed_since_build ? ', ' + searchIndex.changed_since_build + ' changed since' : '' %>.
+            <% } else if (searchIndex.building) { %>Index: being built (searches use the old match meanwhile).
+            <% } else { %>Index: not built yet; it builds on the first search<%= searchIndex.error ? ' (last attempt failed: ' + searchIndex.error + ')' : '' %>.<% } %>
+          </p>
+          <% } %>
+          <form method="POST" action="<%= hams_url('/settings/ai/flags') %>">
+            <%- csrf_field %><input type="hidden" name="key" value="<%= c.key %>"><input type="hidden" name="on" value="<%= c.switch ? '0' : '1' %>">
+            <button class="px-4 py-2 rounded-xl text-xs font-medium <%= c.switch ? 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' %>"><%= c.switch ? 'Switch off' : 'Switch on' %></button>
+          </form>
+        </div>
+        <% } %>
+      </div>
+      <p class="text-xs text-slate-500 mt-3">Each capability switches on and off on its own; with the master switch off, none of them runs.</p>
+    </div>
+
+    <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+      <div class="flex flex-wrap items-start justify-between gap-4 mb-5">
+        <div>
+          <h2 class="font-heading font-semibold text-white mb-1">History recorded so far</h2>
+          <p class="text-xs text-slate-500">What the feature snapshots have captured. The first run is the baseline; lifecycle events are recorded from the second run on.</p>
+        </div>
+        <form method="POST" action="<%= hams_url('/settings/ai/jobs/ai_snapshot/run') %>">
+          <%- csrf_field %>
+          <% const snapOn = capabilities.some(c => c.key === 'snapshots' && c.effective); %>
+          <button <%= snapOn ? '' : 'disabled' %> class="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium <%= snapOn ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-white/5 text-slate-600 cursor-not-allowed' %>" title="<%= snapOn ? '' : 'Switch on AI and Feature snapshots first' %>"><i data-lucide="play" class="w-3.5 h-3.5"></i>Run snapshot now</button>
+        </form>
+      </div>
+      <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-5">
+        <div><dt class="text-xs text-slate-500 mb-0.5">Snapshot rows</dt><dd class="text-white font-medium"><%= Number(snapshot.rows).toLocaleString('en-IN') %></dd></div>
+        <div><dt class="text-xs text-slate-500 mb-0.5">Assets covered</dt><dd class="text-white font-medium"><%= Number(snapshot.assets).toLocaleString('en-IN') %></dd></div>
+        <div><dt class="text-xs text-slate-500 mb-0.5">Snapshot days</dt><dd class="text-white font-medium"><%= snapshot.dates %></dd></div>
+        <div><dt class="text-xs text-slate-500 mb-0.5">History</dt><dd class="text-white font-medium"><%= snapshot.first_date ? formatDate(snapshot.first_date) + ' → ' + formatDate(snapshot.last_date) : 'none yet' %></dd></div>
+      </dl>
+      <div class="text-xs text-slate-500 mb-2">Lifecycle events captured</div>
+      <% if (snapshot.events.length) { %>
+      <div class="flex flex-wrap gap-2 mb-5">
+        <% for (const ev of snapshot.events) { %>
+        <span class="px-2.5 py-1 rounded-lg text-xs bg-white/5 text-slate-300" title="<%= ev.precision === 'exact' ? 'Seen live in the app (exact time)' : 'Found by comparing snapshots (happened between two runs)' %>"><%= ev.event_type.replace(/_/g, ' ') %> · <%= ev.precision %> · <%= ev.n %></span>
+        <% } %>
+      </div>
+      <% } else { %><p class="text-sm text-slate-500 mb-5">None yet.</p><% } %>
+      <% for (const j of jobs.filter(x => x.key === 'ai_snapshot')) { const s = j.state; %>
+      <div class="border-t border-white/5 pt-4 text-xs text-slate-400 flex flex-wrap gap-x-6 gap-y-1">
+        <span><span class="text-slate-500">Schedule:</span> <%= j.schedule %> (<%= j.enabled ? 'on' : 'off' %>)</span>
+        <% if (s && s.last_run_at) { %>
+        <span><span class="text-slate-500">Last run:</span> <%= formatDateTime(s.last_run_at) %><%= s.manual ? ' (manual' + (s.by ? ', ' + s.by : '') + ')' : '' %></span>
+        <span class="<%= s.status === 'error' ? 'text-rose-400' : '' %>"><%= s.status === 'error' ? s.error : s.summary %></span>
+        <% } else { %><span>Not run yet.</span><% } %>
+      </div>
+      <% } %>
+    </div>
+
+    <div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+      <div class="px-6 pt-6 pb-4">
+        <h2 class="font-heading font-semibold text-white mb-1">AI jobs</h2>
+        <p class="text-xs text-slate-500">Run on their schedule while their capability is on. Heavy work runs in a background thread, so the app stays responsive.</p>
+      </div>
+      <div class="table-responsive">
+        <table class="w-full min-w-[760px] text-sm">
+          <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
+            <th class="px-6 py-3">Job</th><th class="px-6 py-3">Schedule</th><th class="px-6 py-3">Last run</th><th class="px-6 py-3 text-right"></th>
+          </tr></thead>
+          <tbody class="divide-y divide-white/5">
+            <% for (const j of jobs) { const s = j.state; %>
+            <tr>
+              <td class="px-6 py-3"><div class="text-white"><%= j.label %></div><div class="text-xs text-slate-500"><%= j.description %></div></td>
+              <td class="px-6 py-3 text-slate-400 whitespace-nowrap"><%= j.schedule %><div class="text-xs <%= j.enabled ? 'text-emerald-400' : 'text-slate-500' %>"><%= j.enabled ? 'on' : 'off' %></div></td>
+              <td class="px-6 py-3 text-xs text-slate-400">
+                <% if (s && s.last_run_at) { %><%= formatDateTime(s.last_run_at) %><%= s.manual ? ' (manual)' : '' %>
+                  <div class="<%= s.status === 'error' ? 'text-rose-400' : 'text-slate-300' %>"><%= s.status === 'error' ? s.error : s.summary %></div>
+                <% } else { %>Not run yet.<% } %>
+              </td>
+              <td class="px-6 py-3 text-right">
+                <form method="POST" action="<%= hams_url('/settings/ai/jobs/' + j.key + '/run') %>"><%- csrf_field %>
+                  <button <%= j.enabled ? '' : 'disabled' %> class="px-3 py-1.5 rounded-xl text-xs <%= j.enabled ? 'bg-white/5 hover:bg-white/10 text-slate-300' : 'bg-white/5 text-slate-600 cursor-not-allowed' %>">Run now</button>
+                </form>
+              </td>
+            </tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <% if (dq) { %>
+    <a href="<%= hams_url('/ai/data-health') %>" class="flex flex-wrap items-center justify-between gap-3 bg-hams-card border border-white/5 rounded-3xl p-6 hover:border-blue-500/30">
+      <span class="flex items-center gap-3"><i data-lucide="shield-check" class="w-5 h-5 text-blue-400"></i><span class="text-white font-medium">Data Health</span></span>
+      <span class="text-sm text-slate-400">Average score <%= dq.avg_score %> over <%= Number(dq.assets).toLocaleString('en-IN') %> active assets · scanned <%= formatDateTime(dq.run_at) %> →</span>
+    </a>
+    <% } %>
+
+    <div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+      <div class="px-6 pt-6 pb-4">
+        <h2 class="font-heading font-semibold text-white mb-1">Models</h2>
+        <p class="text-xs text-slate-500">Every trained model version with its test metrics. One version per model is active.</p>
+      </div>
+      <% if (models.length) { %>
+      <div class="table-responsive">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
+            <th class="px-6 py-3">Model</th><th class="px-6 py-3">Version</th><th class="px-6 py-3">Status</th><th class="px-6 py-3">Trained</th><th class="px-6 py-3">Metrics</th>
+          </tr></thead>
+          <tbody class="divide-y divide-white/5">
+            <%
+            // Metric name and value as people read them: shares as %, scores (Brier, calibration error) and times as numbers.
+            const metricName = k => ({ brier: 'Brier score', ece: 'calibration error', auc: 'AUC', weibull_one_shape_brier: 'single-shape Weibull Brier',
+              injected_auc: 'detection AUC (test copies)', flagged_share: 'flagged', mrr10: 'MRR@10', hit10: 'top-10 hit', old_search_mrr10: 'old search MRR@10',
+              cv_accuracy: 'cross-validated correct', cv_macroF1: 'cross-validated macro-F1', nb_macroF1: 'Naive Bayes macro-F1', lr_macroF1: 'logistic regression macro-F1', utterances: 'seed questions' })[k]
+              || k.replace(/_macroF1$/, ' macro-F1').replace(/_accuracy$/, ' correct').replace(/_ms$/, ' (ms)').replace(/_/g, ' ');
+            const metricValue = (k, v) => (typeof v !== 'number' ? v : /_ms$/.test(k) ? v.toFixed(1) : /brier|^ece$/.test(k) ? v.toFixed(3) : v >= 0 && v <= 1 ? (v * 100).toFixed(1) + '%' : v);
+            const metricNote = { search_bm25: 'on labelled queries generated from the register; time to rank in ms', lifecycle_weibull: 'on 20% of assets held out: was each already retired at its age (lower Brier is better)',
+              anomaly_iforest: 'corrupted copies of real assets among real ones; share of active assets flagged',
+              nl_intent: '5-fold cross-validation on the seed questions; the better of the two classifiers is kept' };
+            %>
+            <% for (const m of models) { %>
+            <tr>
+              <td class="px-6 py-3 text-white"><%= m.name %></td>
+              <td class="px-6 py-3 text-slate-400">v<%= m.version %></td>
+              <td class="px-6 py-3"><span class="px-2 py-0.5 rounded text-xs <%= m.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-500/10 text-slate-500' %>"><%= m.status %></span></td>
+              <td class="px-6 py-3 text-slate-400"><%= formatDateTime(m.trained_at) %></td>
+              <td class="px-6 py-3 text-slate-400 text-xs"><%= m.metrics ? Object.entries(m.metrics).map(([k, v]) => { const n = metricName(k); return n.charAt(0).toUpperCase() + n.slice(1) + ' ' + metricValue(k, v); }).join(' · ') : '—' %>
+                <div class="text-[10px] text-slate-600"><%= metricNote[m.name] || 'on the newest 10% of assets, held out from training' %></div></td>
+            </tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+      <% } else { %><p class="px-6 pb-6 text-sm text-slate-500">No models trained yet.</p><% } %>
+    </div>
+
+    <% if (nlMisses) { %>
+    <div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+      <div class="px-6 pt-6 pb-4">
+        <h2 class="font-heading font-semibold text-white mb-1">Questions the assistant didn't answer well</h2>
+        <p class="text-xs text-slate-500">Questions it fell back to search on, was unsure about, or someone marked "Not what I meant". Add them to the seed set (src/ai/nl/seed.js) to teach it.</p>
+      </div>
+      <% if (nlMisses.length) { %>
+      <div class="table-responsive">
+        <table class="w-full text-sm">
+          <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
+            <th class="px-6 py-3">Question</th><th class="px-6 py-3">Read as</th><th class="px-6 py-3">Why kept</th><th class="px-6 py-3">When</th>
+          </tr></thead>
+          <tbody class="divide-y divide-white/5">
+            <% for (const m of nlMisses) { const p = m.predicted || {}; %>
+            <tr>
+              <td class="px-6 py-3 text-white"><%= p.q %></td>
+              <td class="px-6 py-3 text-slate-400"><%= p.intent ? p.intent.replace('_', ' ') + (p.confidence != null ? ' (' + Math.round(p.confidence * 100) + '%)' : '') : '—' %></td>
+              <td class="px-6 py-3 text-slate-400"><%= m.label === 'rejected' ? 'Not what I meant' : 'Unsure / searched instead' %></td>
+              <td class="px-6 py-3 text-slate-400"><%= formatDateTime(m.created_at) %></td>
+            </tr>
+            <% } %>
+          </tbody>
+        </table>
+      </div>
+      <% } else { %><p class="px-6 pb-6 text-sm text-slate-500">None yet.</p><% } %>
+    </div>
+    <% } %>
+
+    <% if (master) { %>
+    <a href="<%= hams_url('/ai/approvals') %>" class="flex items-center justify-between bg-hams-card border border-white/5 rounded-3xl p-6 hover:border-blue-500/30">
+      <span class="flex items-center gap-3"><i data-lucide="inbox" class="w-5 h-5 text-blue-400"></i><span class="text-white font-medium">AI Approvals</span></span>
+      <span class="text-sm text-slate-400"><%= pending %> waiting for a decision →</span>
+    </a>
+    <% } %>
+    <% } %>
+  </div>
+</div>

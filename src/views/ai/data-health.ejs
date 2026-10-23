@@ -1,0 +1,164 @@
+<%
+  const sevDot = s => (s === 'high' ? 'bg-rose-400' : s === 'medium' ? 'bg-amber-400' : 'bg-slate-400');
+  const scoreText = v => (v >= 90 ? 'text-emerald-400' : v >= 70 ? 'text-amber-400' : 'text-rose-400');
+  const n = v => Number(v || 0).toLocaleString('en-IN');
+%>
+<div class="space-y-6">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h1 class="font-heading text-2xl md:text-3xl font-bold text-white mb-1">Data Health</h1>
+      <p class="text-sm text-slate-500">How complete and consistent the register is, checked by the in-house AI. Each issue says why; fixes that need a decision wait in AI Approvals.<%= ready && !global ? ' Showing your locations only.' : '' %></p>
+    </div>
+    <% if (ready) { %>
+    <div class="text-xs text-slate-500 text-right">
+      Last scan <%= formatDateTime(run.run_at) %> (<%= run.trigger %>, <%= (run.duration_ms / 1000).toFixed(1) %> s)
+      <% if (canRun) { %>
+      <form method="POST" action="<%= hams_url('/settings/ai/jobs/ai_dq_scan/run') %>" class="mt-2"><%- csrf_field %>
+        <button class="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300">Run scan now</button></form>
+      <% } %>
+    </div>
+    <% } %>
+  </div>
+
+  <% if (!ready) { %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-10 text-center text-slate-400">The first data-health scan hasn't run yet. It runs at 02:00, after imports, or from Settings &gt; AI.</div>
+  <% } else { %>
+
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+      <div class="text-xs text-slate-500 mb-1">Average score</div>
+      <div class="text-4xl font-bold font-heading <%= scoreText(stats.avg) %>"><%= stats.avg ?? '—' %></div>
+      <div class="text-xs text-slate-500 mt-1">over <%= n(stats.assets) %> active assets</div>
+    </div>
+    <% for (const [label, key, color] of [['Good (90+)', 'good', 'emerald'], ['Fair (70–89)', 'fair', 'amber'], ['Poor (below 70)', 'poor', 'rose']]) { %>
+    <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+      <div class="text-xs text-slate-500 mb-1"><%= label %></div>
+      <div class="text-3xl font-bold font-heading text-<%= color %>-400"><%= n(stats[key]) %></div>
+      <div class="text-xs text-slate-500 mt-1"><%= stats.assets ? Math.round(stats[key] / stats.assets * 100) : 0 %>% of assets</div>
+    </div>
+    <% } %>
+  </div>
+
+  <% if (list) { %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+    <div class="flex flex-wrap items-center justify-between gap-3 px-6 pt-6 pb-4">
+      <div>
+        <h2 class="font-heading font-semibold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full <%= sevDot(list.severity) %>"></span><%= list.label %></h2>
+        <p class="text-xs text-slate-500"><%= n(list.total) %> asset(s) · <%= list.group %> · <%= list.severity %> severity</p>
+      </div>
+      <a href="<%= hams_url('/ai/data-health') %>" class="text-xs text-blue-400 hover:text-blue-300">← All issues</a>
+    </div>
+    <div class="table-responsive">
+      <table class="w-full min-w-[760px] text-sm">
+        <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
+          <th class="px-6 py-3">Asset</th><th class="px-6 py-3">Location</th><th class="px-6 py-3">Status</th><th class="px-6 py-3">Why</th>
+        </tr></thead>
+        <tbody class="divide-y divide-white/5">
+          <% for (const r of list.rows) { %>
+          <tr>
+            <td class="px-6 py-3"><a href="<%= hams_url('/assets/' + r.id) %>" class="text-blue-400 hover:text-blue-300 font-mono text-xs"><%= r.asset_tag %></a><div class="text-white"><%= r.name %></div></td>
+            <td class="px-6 py-3 text-slate-400"><%= r.location || '—' %></td>
+            <td class="px-6 py-3 text-slate-400"><%= r.status || '—' %></td>
+            <td class="px-6 py-3 text-slate-300"><%= r.detail %><%= r.confidence < 1 ? ' (' + Math.round(r.confidence * 100) + '% sure)' : '' %></td>
+          </tr>
+          <% } %>
+          <% if (!list.rows.length) { %><tr><td colspan="4" class="px-6 py-10 text-center text-slate-500">No assets with this issue.</td></tr><% } %>
+        </tbody>
+      </table>
+    </div>
+    <%- await include('../components/pagination', { paginator, baseUrl }) %>
+  </div>
+  <% } %>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="lg:col-span-2 bg-hams-card border border-white/5 rounded-3xl p-6">
+      <h2 class="font-heading font-semibold text-white mb-1">Issues</h2>
+      <p class="text-xs text-slate-500 mb-4">Assets affected. Click an issue to see the assets and why. High issues cost 30 points, medium 15, low 5.</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <% for (const g of groups) { %>
+        <div>
+          <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2"><%= g.group %></div>
+          <% for (const i of g.issues) { %>
+          <a href="<%= hams_url('/ai/data-health?issue=' + i.code) %>" class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm <%= i.n ? 'hover:bg-white/5' : 'opacity-50' %> <%= issue === i.code ? 'bg-blue-600/10' : '' %>">
+            <span class="w-2 h-2 rounded-full <%= sevDot(i.severity) %>" title="<%= i.severity %>"></span>
+            <span class="flex-1 text-slate-300"><%= i.label %></span>
+            <span class="text-white font-medium"><%= n(i.n) %></span>
+          </a>
+          <% } %>
+        </div>
+        <% } %>
+      </div>
+    </div>
+
+    <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+      <h2 class="font-heading font-semibold text-white mb-4">By location</h2>
+      <div class="space-y-1 max-h-[28rem] overflow-y-auto">
+        <% for (const l of byLocation) { %>
+        <div class="flex items-center gap-3 px-2 py-1.5 text-sm">
+          <span class="flex-1 text-slate-300 truncate" title="<%= l.location %>"><%= l.location %></span>
+          <span class="text-xs text-slate-500"><%= n(l.assets) %></span>
+          <span class="w-12 text-right font-medium <%= scoreText(l.avg) %>"><%= l.avg %></span>
+        </div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+
+  <% if (modules) { %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <h2 class="font-heading font-semibold text-white mb-1">By module</h2>
+    <p class="text-xs text-slate-500 mb-4">Hardware is the average asset score; the others are the share of records passing each check.</p>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <% for (const m of modules) { %>
+      <div class="p-4 rounded-2xl bg-white/[.03] border border-white/5">
+        <div class="flex items-center justify-between mb-3"><span class="text-white font-medium"><%= m.module %></span><span class="text-2xl font-bold font-heading <%= scoreText(m.score) %>"><%= m.score ?? '—' %></span></div>
+        <% for (const c of m.checks) { %>
+        <div class="text-xs text-slate-400 mb-1.5"><%= c.label %><span class="float-right text-slate-300"><%= c.total ? Math.round(c.ok / c.total * 100) + '%' : '—' %></span>
+          <div class="text-[10px] text-slate-600"><%= n(c.ok) %> of <%= n(c.total) %></div></div>
+        <% } %>
+      </div>
+      <% } %>
+    </div>
+  </div>
+  <% } %>
+
+  <% if (catalog) { %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <h2 class="font-heading font-semibold text-white mb-1">Catalog findings</h2>
+    <p class="text-xs text-slate-500 mb-4">Inventory Setup entries to review. Category fixes are proposed in AI Approvals; merging duplicate models stays manual.</p>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+      <div>
+        <div class="text-xs text-slate-500 mb-2">Model categories that disagree with their assets</div>
+        <% for (const f of catalog.model_category_fixes) { %><div class="text-slate-300 mb-1">"<%= f.name %>": <%= f.from_name %> → <%= f.to_name %> <span class="text-xs text-slate-500">(<%= n(f.count) %> of <%= n(f.total) %> assets)</span></div><% } %>
+        <% if (!catalog.model_category_fixes.length) { %><div class="text-slate-500">None.</div><% } %>
+      </div>
+      <div>
+        <div class="text-xs text-slate-500 mb-2">Duplicate model spellings</div>
+        <% for (const g of catalog.model_variants) { %><div class="text-slate-300 mb-1"><%= g.names.map(x => '"' + x + '"').join(' · ') %></div><% } %>
+        <% if (!catalog.model_variants.length) { %><div class="text-slate-500">None.</div><% } %>
+      </div>
+      <div>
+        <div class="text-xs text-slate-500 mb-2">Suppliers that look like one company</div>
+        <% for (const g of catalog.supplier_groups) { %><div class="text-slate-300 mb-1"><%= g.names.join(' · ') %></div><% } %>
+        <% if (!catalog.supplier_groups.length) { %><div class="text-slate-500">None.</div><% } %>
+      </div>
+    </div>
+  </div>
+  <% } %>
+
+  <% if (history.length > 1) { %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <h2 class="font-heading font-semibold text-white mb-4">Trend</h2>
+    <div class="flex items-end gap-2 h-24">
+      <% for (const h of history) { %>
+      <div class="flex-1 flex flex-col items-center gap-1" title="<%= formatDateTime(h.run_at) %>: <%= h.avg %>">
+        <span class="text-[10px] text-slate-400"><%= h.avg %></span>
+        <div class="w-full rounded-t bg-blue-500/60" style="height: <%= Math.max(4, (h.avg || 0) * 0.7) %>px"></div>
+        <span class="text-[10px] text-slate-600"><%= formatDate(h.run_at).slice(5) %></span>
+      </div>
+      <% } %>
+    </div>
+  </div>
+  <% } %>
+  <% } %>
+</div>

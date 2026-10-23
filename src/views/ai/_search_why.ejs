@@ -1,0 +1,5 @@
+<%# Smart search: how well one listed asset matches the words typed, and why. %>
+<div class="mt-1 flex items-center gap-2 text-[11px] max-w-md" title="<%= why.why.join('; ') %>">
+  <span class="shrink-0 px-1.5 py-0.5 rounded-md font-semibold <%= why.match >= 0.9 ? 'bg-emerald-500/10 text-emerald-400' : (why.match >= 0.7 ? 'bg-sky-500/10 text-sky-400' : 'bg-amber-500/10 text-amber-400') %>"><%= Math.round(why.match * 100) %>% match</span>
+  <span class="text-slate-500 truncate"><%= why.why.join('; ') %></span>
+</div>

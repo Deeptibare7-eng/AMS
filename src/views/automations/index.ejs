@@ -1,0 +1,317 @@
+<% const fieldMap = Object.fromEntries(Object.keys(events).map(ev => [ev, fieldsFor(ev)]));
+   const input = 'w-full px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-sm text-slate-200 outline-none focus:border-blue-500';
+   const groups = [['imports', 'Imports'], ['alerts', 'Alerts & summaries'], ['existing', 'Existing schedules'], ['cleanup', 'Clean-up (deletes data, off by default)']];
+   const when = s => s ? formatDateTime(new Date(s)) : '';
+   const actionText = a => {
+     const c = a.config || {};
+     if (a.type === 'email') return 'Email ' + (c.to || '');
+     if (a.type === 'teams') return 'Teams message';
+     if (a.type === 'notify') return 'In-app notification';
+     if (a.type === 'webhook') return 'Webhook ' + (c.url || '');
+     return 'Log';
+   };
+   const parse = v => { try { return typeof v === 'string' ? JSON.parse(v) : (v || []); } catch (_) { return []; } }; %>
+<div x-data="{ addOpen: false, ev: 'asset.status_changed', conditions: [], actions: [{ type: 'email' }], fields: <%- safeJson(fieldMap).replace(/"/g, '&quot;') %> }">
+
+<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+  <div>
+    <h1 class="font-heading text-2xl md:text-3xl font-bold text-white">Automations</h1>
+    <p class="text-sm text-slate-500 mt-1">Scheduled jobs, daily alerts and event rules, run by the app itself. No cron or Task Scheduler needed.</p>
+  </div>
+  <span class="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium <%= scheduler.running ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-amber-500/10 border border-amber-500/20 text-amber-300' %>">
+    <span class="w-1.5 h-1.5 rounded-full <%= scheduler.running ? 'bg-emerald-400' : 'bg-amber-400' %>"></span>
+    <%= scheduler.running ? `Scheduler running · times in ${scheduler.tz}` : 'Scheduler is off (SCHEDULER_ENABLED=0)' %>
+  </span>
+</div>
+
+<% if (!smtp.enabled) { %>
+<div class="mb-6 px-5 py-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-sm text-amber-200 flex flex-wrap items-center gap-3">
+  <i data-lucide="mail-warning" class="w-4 h-4"></i>
+  <span><b>Email is not set up yet</b> (<%= smtp.reason %>). Alerts still go to in-app notifications<%= cfg.teams_webhook_url ? ' and Teams' : '' %>; emails are logged as skipped.</span>
+  <a href="<%= hams_url('/settings/notifications') %>" class="ml-auto text-xs px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white">Set up email</a>
+</div>
+<% } %>
+
+<!-- Daily folder import -->
+<% const IC = imports.cfg, IS = imports.state;
+   const importJob = scheduler.jobs.find(j => j.key === 'folder_imports');
+   const importPill = !IC.folders.length ? ['amber', 'Not set up'] : !importJob.enabled ? ['slate', 'Switched off'] : ['emerald', `Watching ${IC.folders.length} folder${IC.folders.length === 1 ? '' : 's'}`];
+   const resultColor = { imported: 'emerald', held: 'amber', failed: 'rose' };
+   const typeLabel = { register: 'Asset Data register' }; %>
+<div id="folder-import" class="bg-hams-card border border-white/5 rounded-3xl p-6 mb-6">
+  <div class="flex flex-wrap items-start justify-between gap-3 mb-5">
+    <div>
+      <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="folder-sync" class="w-4 h-4 text-blue-400"></i>Daily folder import</h2>
+      <p class="text-xs text-slate-500 mt-1 max-w-3xl">Save the daily <b class="text-slate-300">Asset Data register</b> (.xlsx) into a folder this server can read, e.g. a synced OneDrive folder. Every 30 minutes the app looks for a new file, recognises it by its columns (any file name works) and imports it exactly like the Import Data page. Files are never moved or changed.</p>
+    </div>
+    <span class="px-3 py-1.5 rounded-xl text-xs font-medium bg-<%= importPill[0] %>-500/10 text-<%= importPill[0] %>-300"><%= importPill[1] %></span>
+  </div>
+  <form method="POST" action="<%= hams_url('/settings/automations/imports') %>" class="grid grid-cols-1 md:grid-cols-3 gap-5">
+    <%- csrf_field %>
+    <label class="md:col-span-3 text-xs text-slate-400">Folder(s) to watch, one per line
+      <textarea name="import_folders" rows="2" placeholder="C:\Users\you\OneDrive - Company\IT Asset Imports" class="mt-1 font-mono <%= input %>"><%= IC.folders.join('\n') %></textarea>
+      <span class="block mt-1 text-slate-500">Full path on the machine running IT-HAMS. For a OneDrive folder, right-click it and choose "Always keep on this device" so the files are really there.</span>
+    </label>
+    <label class="text-xs text-slate-400">Asset Data register
+      <select name="import_register_mode" class="mt-1 <%= input %>">
+        <option value="auto" <%= IC.mode === 'auto' ? 'selected' : '' %>>Apply automatically within the limits</option>
+        <option value="review" <%= IC.mode === 'review' ? 'selected' : '' %>>Always hold for my review</option>
+      </select>
+      <span class="block mt-1 text-slate-500">The register import never deletes anything.</span>
+    </label>
+    <label class="text-xs text-slate-400">Hold if more allocations would change than
+      <input type="number" name="import_max_alloc_changes" min="0" value="<%= IC.maxAlloc %>" class="mt-1 <%= input %>">
+      <span class="block mt-1 text-slate-500">Assignments + returns + reassignments in one file. 0 = no limit.</span>
+    </label>
+    <label class="text-xs text-slate-400">Hold if more records would be updated than (%)
+      <input type="number" name="import_max_update_pct" min="0" max="100" step="0.5" value="<%= IC.maxUpdatePct %>" class="mt-1 <%= input %>">
+      <span class="block mt-1 text-slate-500">Also held if the file has under half the hardware in the tool.</span>
+    </label>
+    <div class="md:col-span-3 flex flex-wrap items-center justify-end gap-3">
+      <% if (IC.folders.length) { %><button type="submit" form="run-folder-import" class="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-200">Check folder now</button><% } %>
+      <button class="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium">Save import settings</button>
+    </div>
+  </form>
+  <form id="run-folder-import" method="POST" action="<%= hams_url('/settings/automations/jobs/folder_imports/run') %>"
+        onsubmit="var b=document.querySelector('[form=run-folder-import]'); if (b) { b.disabled=true; b.textContent='Checking…'; }"><%- csrf_field %></form>
+
+  <% if (IS.errors && IS.errors.length) { %>
+  <div class="mt-5 px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300">Folder problem at the last check: <%= IS.errors.join('; ') %></div>
+  <% } %>
+  <% if (imports.recent.length || IS.checked_at) { %>
+  <div class="mt-6 pt-5 border-t border-white/5">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-medium text-white">Recent files</h3>
+      <span class="text-xs text-slate-500"><%= IS.checked_at ? 'Last checked ' + when(IS.checked_at) : '' %></span>
+    </div>
+    <div class="table-responsive">
+      <table class="w-full min-w-[760px] text-sm">
+        <thead><tr class="text-left text-xs text-slate-500 uppercase tracking-wider border-b border-white/5"><th class="px-4 py-2">File</th><th class="px-4 py-2">Type</th><th class="px-4 py-2">Result</th><th class="px-4 py-2">When</th></tr></thead>
+        <tbody class="divide-y divide-white/5">
+          <% for (const r of imports.recent) { const rc = resultColor[r.status] || 'slate'; %>
+          <tr class="align-top">
+            <td class="px-4 py-2 text-white text-xs font-mono"><%= r.file %></td>
+            <td class="px-4 py-2 text-slate-400 text-xs whitespace-nowrap"><%= typeLabel[r.type] || '—' %></td>
+            <td class="px-4 py-2 text-xs"><span class="px-1.5 py-0.5 rounded bg-<%= rc %>-500/10 text-<%= rc %>-400 font-medium"><%= r.status %></span> <span class="text-slate-400"><%= r.text %></span></td>
+            <td class="px-4 py-2 text-slate-500 text-xs whitespace-nowrap"><%= when(r.at) %></td>
+          </tr>
+          <% } %>
+          <% if (!imports.recent.length) { %><tr><td colspan="4" class="px-4 py-6 text-center text-slate-500 text-xs">No files handled yet.</td></tr><% } %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <% } %>
+</div>
+
+<!-- Scheduled jobs -->
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden mb-6">
+  <div class="flex flex-wrap items-center justify-between gap-3 px-6 pt-6 pb-4">
+    <div>
+      <h2 class="font-heading font-semibold text-white">Scheduled jobs</h2>
+      <p class="text-xs text-slate-500 mt-1">Tick a job to switch it on, then press <b class="text-slate-300">Save settings</b> below. "Run now" runs a job immediately, even if it is switched off.</p>
+    </div>
+  </div>
+  <div class="table-responsive">
+    <table class="w-full min-w-[980px] text-sm">
+      <thead><tr class="text-left text-xs text-slate-500 uppercase tracking-wider border-b border-white/5">
+        <th class="px-6 py-3 w-16">On</th><th class="px-6 py-3">Job</th><th class="px-6 py-3 w-40">Schedule</th><th class="px-6 py-3">Last run</th><th class="px-6 py-3 w-28"></th>
+      </tr></thead>
+      <% for (const [g, gLabel] of groups) { %>
+      <tbody class="divide-y divide-white/5">
+        <tr><td colspan="5" class="px-6 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wider <%= g === 'cleanup' ? 'text-rose-400' : 'text-slate-500' %>"><%= gLabel %></td></tr>
+        <% for (const j of scheduler.jobs.filter(x => x.group === g)) { const s = j.state; %>
+        <tr class="align-top">
+          <td class="px-6 py-3"><input type="checkbox" form="automation-settings" name="job_<%= j.key %>" value="1" <%= j.enabled ? 'checked' : '' %> class="w-4 h-4 rounded mt-0.5"></td>
+          <td class="px-6 py-3">
+            <div class="text-white font-medium flex items-center gap-2"><%= j.label %><% if (j.destructive) { %><span class="px-1.5 py-0.5 rounded text-[10px] bg-rose-500/10 text-rose-400">Permanent</span><% } %></div>
+            <div class="text-xs text-slate-500 mt-0.5 max-w-xl"><%= j.description %></div>
+          </td>
+          <td class="px-6 py-3 text-slate-300 whitespace-nowrap"><%= j.schedule %></td>
+          <td class="px-6 py-3 text-xs">
+            <% if (!s || !s.last_run_at) { %>
+              <span class="text-slate-500"><%= j.enabled ? 'Waiting for its first scheduled time' : 'Never run' %></span>
+            <% } else { %>
+              <div class="flex items-center gap-2">
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium <%= s.status === 'ok' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400' %>"><%= s.status === 'ok' ? 'OK' : 'Error' %></span>
+                <span class="text-slate-400"><%= when(s.last_run_at) %><%= s.manual ? ' · run manually' + (s.by ? ' by ' + s.by : '') : '' %></span>
+              </div>
+              <div class="mt-1 <%= s.status === 'ok' ? 'text-slate-400' : 'text-rose-300' %> max-w-md"><%= s.status === 'ok' ? s.summary : s.error %></div>
+            <% } %>
+          </td>
+          <td class="px-6 py-3 text-right">
+            <form method="POST" action="<%= hams_url('/settings/automations/jobs/' + j.key + '/run') %>" <% if (j.destructive) { %>data-confirm="This permanently deletes expired archived records. Run it now?"<% } %>
+                  onsubmit="var b=this.querySelector('button'); b.disabled=true; b.textContent='Running…';">
+              <%- csrf_field %>
+              <button class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-slate-200 whitespace-nowrap">Run now</button>
+            </form>
+          </td>
+        </tr>
+        <% } %>
+      </tbody>
+      <% } %>
+    </table>
+  </div>
+</div>
+
+<!-- Delivery & thresholds -->
+<form id="automation-settings" method="POST" action="<%= hams_url('/settings/automations/settings') %>" class="bg-hams-card border border-white/5 rounded-3xl p-6 mb-6">
+  <%- csrf_field %>
+  <h2 class="font-heading font-semibold text-white mb-1">Delivery &amp; thresholds</h2>
+  <p class="text-xs text-slate-500 mb-5">Who receives the daily alerts and weekly summary, and what counts as a problem.</p>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+    <label class="text-xs text-slate-400">Daily alert recipients
+      <input type="text" name="alert_recipients" value="<%= cfg.alert_recipients %>" placeholder="it-team@company.com, helpdesk@company.com" class="mt-1 <%= input %>">
+      <span class="block mt-1 text-slate-500">Comma-separated. Empty = admins with a real email address.</span>
+    </label>
+    <label class="text-xs text-slate-400">Weekly summary recipients
+      <input type="text" name="summary_recipients" value="<%= cfg.summary_recipients %>" placeholder="head-of-it@company.com" class="mt-1 <%= input %>">
+      <span class="block mt-1 text-slate-500">Empty = same as daily alert recipients.</span>
+    </label>
+    <label class="text-xs text-slate-400 md:col-span-2">Microsoft Teams webhook URL
+      <input type="url" name="teams_webhook_url" value="<%= cfg.teams_webhook_url %>" placeholder="https://… (Teams channel → Workflows → 'Post to a channel when a webhook request is received')" class="mt-1 <%= input %>">
+      <span class="block mt-1 text-slate-500">Optional. Digests are also posted to this channel.</span>
+    </label>
+    <label class="flex items-center gap-2 text-sm text-slate-300 md:col-span-2"><input type="checkbox" name="in_app_enabled" value="1" <%= cfg.in_app_enabled !== '0' ? 'checked' : '' %> class="rounded">Also send digests as in-app notifications to admins</label>
+  </div>
+
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-5 mt-6 pt-6 border-t border-white/5">
+    <label class="text-xs text-slate-400">Daily alerts at<input type="time" name="daily_time" value="<%= cfg.daily_time %>" class="mt-1 <%= input %>"></label>
+    <label class="text-xs text-slate-400">Weekly summary on
+      <select name="weekly_day" class="mt-1 <%= input %>"><% days.forEach((d, i) => { %><option value="<%= i %>" <%= String(i) === String(cfg.weekly_day) ? 'selected' : '' %>><%= d %></option><% }) %></select>
+    </label>
+    <label class="text-xs text-slate-400">Weekly summary at<input type="time" name="weekly_time" value="<%= cfg.weekly_time %>" class="mt-1 <%= input %>"></label>
+    <label class="text-xs text-slate-400">Time zone<input type="text" name="timezone" value="<%= cfg.timezone %>" placeholder="Asia/Kolkata" class="mt-1 <%= input %>"></label>
+    <label class="text-xs text-slate-400">Warranty alerts (days before expiry)<input type="text" name="warranty_days" value="<%= cfg.warranty_days %>" placeholder="90,60,30" class="mt-1 <%= input %>"></label>
+    <label class="text-xs text-slate-400">Low-stock category<input type="text" name="low_stock_category" value="<%= cfg.low_stock_category %>" placeholder="Laptop" class="mt-1 <%= input %>"></label>
+    <label class="text-xs text-slate-400">Minimum spares per site<input type="number" name="low_stock_threshold" min="0" value="<%= cfg.low_stock_threshold %>" class="mt-1 <%= input %>"><span class="block mt-1 text-slate-500">0 = no low-stock alerts</span></label>
+  </div>
+
+  <div class="flex flex-wrap items-center justify-end gap-3 mt-6">
+    <% if (cfg.teams_webhook_url) { %><button type="submit" form="test-teams" class="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-200">Send test Teams message</button><% } %>
+    <button class="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium">Save settings</button>
+  </div>
+</form>
+<form id="test-teams" method="POST" action="<%= hams_url('/settings/automations/test-teams') %>"><%- csrf_field %></form>
+
+<!-- Event rules -->
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden mb-6">
+  <div class="flex flex-wrap items-center justify-between gap-3 px-6 pt-6 pb-4">
+    <div>
+      <h2 class="font-heading font-semibold text-white">Event rules</h2>
+      <p class="text-xs text-slate-500 mt-1">When something happens, notify someone. Example: an asset is set to <i>Lost</i> → email the security team.</p>
+    </div>
+    <button type="button" @click="addOpen = true" class="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"><i data-lucide="plus" class="w-4 h-4"></i>New rule</button>
+  </div>
+  <div class="table-responsive">
+    <table class="w-full min-w-[860px] text-sm">
+      <thead><tr class="text-left text-xs text-slate-500 uppercase tracking-wider border-b border-white/5">
+        <th class="px-6 py-3">Rule</th><th class="px-6 py-3">When</th><th class="px-6 py-3">If</th><th class="px-6 py-3">Then</th><th class="px-6 py-3">Status</th><th class="px-6 py-3 text-right"></th>
+      </tr></thead>
+      <tbody class="divide-y divide-white/5">
+        <% for (const r of rules) { const conds = parse(r.conditions), acts = parse(r.actions); %>
+        <tr class="hover:bg-white/[.02] align-top">
+          <td class="px-6 py-3 text-white font-medium"><%= r.name %></td>
+          <td class="px-6 py-3"><span class="px-2 py-0.5 rounded-lg bg-indigo-500/10 text-indigo-300 text-xs font-mono"><%= r.event_trigger %></span><div class="text-[11px] text-slate-500 mt-1"><%= events[r.event_trigger] || '' %></div></td>
+          <td class="px-6 py-3 text-xs text-slate-400"><%= conds.length ? conds.map(c => `${c.field} ${c.operator} "${c.value}"`).join(' and ') : 'Always' %></td>
+          <td class="px-6 py-3 text-xs text-slate-300"><%= acts.map(actionText).join(' · ') || '—' %></td>
+          <td class="px-6 py-3">
+            <form method="POST" action="<%= hams_url('/settings/automations/' + r.id + '/toggle') %>"><%- csrf_field %>
+              <button class="px-2 py-0.5 rounded text-xs <%= r.is_active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-500/10 text-slate-500' %>" title="Click to <%= r.is_active ? 'disable' : 'enable' %>"><%= r.is_active ? 'Active' : 'Disabled' %></button>
+            </form>
+          </td>
+          <td class="px-6 py-3 text-right">
+            <form method="POST" action="<%= hams_url('/settings/automations/' + r.id + '/delete') %>" data-confirm="Delete this automation rule?">
+              <%- csrf_field %><button class="p-2 rounded-lg hover:bg-rose-500/10 text-rose-400"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+            </form>
+          </td>
+        </tr>
+        <% } %>
+        <% if (!rules.length) { %><tr><td colspan="6" class="px-6 py-10 text-center text-slate-500">No rules yet. Click <b>New rule</b> to create one.</td></tr><% } %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Recent rule runs -->
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+  <h2 class="font-heading font-semibold text-white px-6 pt-6 pb-4">Recent rule runs</h2>
+  <div class="table-responsive">
+    <table class="w-full min-w-[760px] text-sm">
+      <thead><tr class="text-left text-xs text-slate-500 uppercase tracking-wider border-b border-white/5">
+        <th class="px-6 py-3">When</th><th class="px-6 py-3">Rule</th><th class="px-6 py-3">Event</th><th class="px-6 py-3">Result</th>
+      </tr></thead>
+      <tbody class="divide-y divide-white/5">
+        <% for (const l of logs) { %>
+        <tr>
+          <td class="px-6 py-2.5 text-slate-400 whitespace-nowrap"><%= formatDateTime(l.created_at) %></td>
+          <td class="px-6 py-2.5 text-white"><%= l.rule_name || 'Deleted rule' %></td>
+          <td class="px-6 py-2.5 text-xs font-mono text-slate-400"><%= l.event_trigger || '' %></td>
+          <td class="px-6 py-2.5 text-xs <%= l.status === 'success' ? 'text-emerald-400' : 'text-rose-400' %>"><%= l.message %></td>
+        </tr>
+        <% } %>
+        <% if (!logs.length) { %><tr><td colspan="4" class="px-6 py-8 text-center text-slate-500">No rule has run yet.</td></tr><% } %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- New rule -->
+<div x-show="addOpen" x-cloak class="fixed inset-0 z-[90] flex items-start justify-center px-4 py-8 overflow-y-auto">
+  <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="addOpen = false"></div>
+  <div class="relative bg-hams-card border border-white/10 rounded-3xl p-6 w-full max-w-xl">
+    <h3 class="font-heading font-semibold text-white mb-4">New event rule</h3>
+    <form method="POST" action="<%= hams_url('/settings/automations') %>" class="space-y-4">
+      <%- csrf_field %>
+      <div><label class="block text-xs text-slate-400 mb-1">Rule name</label>
+        <input type="text" name="name" required placeholder="e.g. Lost device → security team" class="<%= input %>"></div>
+      <div><label class="block text-xs text-slate-400 mb-1">When</label>
+        <select name="event_trigger" x-model="ev" class="<%= input %>">
+          <% for (const [key, desc] of Object.entries(events)) { %><option value="<%= key %>"><%= desc %></option><% } %>
+        </select>
+        <p class="text-[11px] text-slate-500 mt-1">Fields you can use: <span class="font-mono text-slate-400" x-text="(fields[ev] || []).join(', ')"></span></p>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-2">Only if (all must match; text comparisons ignore upper/lower case)</label>
+        <template x-for="(c, i) in conditions" :key="i">
+          <div class="flex gap-2 mb-2">
+            <select name="condition_field[]" x-model="c.field" class="flex-1 px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-xs font-mono">
+              <template x-for="f in (fields[ev] || [])" :key="f"><option :value="f" x-text="f"></option></template>
+            </select>
+            <select name="condition_operator[]" x-model="c.operator" class="w-28 px-2 py-2 rounded-xl bg-hams-bg border border-white/10 text-xs">
+              <option value="=">equals</option><option value="!=">not equal</option><option value="contains">contains</option><option value=">">&gt;</option><option value="<">&lt;</option>
+            </select>
+            <input type="text" name="condition_value[]" x-model="c.value" placeholder="e.g. Lost" class="flex-1 px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-xs">
+            <button type="button" @click="conditions.splice(i, 1)" class="text-rose-400 px-1">&times;</button>
+          </div>
+        </template>
+        <button type="button" @click="conditions.push({ field: (fields[ev] || [''])[0], operator: '=', value: '' })" class="text-xs text-blue-400 hover:underline">+ Add condition</button>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-400 mb-2">Then</label>
+        <template x-for="(a, i) in actions" :key="i">
+          <div class="space-y-2 mb-3 p-3 rounded-xl bg-white/[.03] border border-white/5">
+            <select name="action_type[]" x-model="a.type" class="w-full px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-xs">
+              <option value="email">Send an email</option><option value="teams">Post to Microsoft Teams</option><option value="notify">In-app notification to admins</option><option value="webhook">Call a webhook</option><option value="log">Write to the log</option>
+            </select>
+            <input type="text" name="action_config_to[]" x-show="a.type === 'email'" placeholder="recipient@company.com, other@company.com" class="w-full px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-xs">
+            <input type="text" name="action_config_teams_url[]" x-show="a.type === 'teams'" x-cloak placeholder="https://… Teams webhook URL" class="w-full px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-xs">
+            <input type="text" name="action_config_url[]" x-show="a.type === 'webhook'" x-cloak placeholder="https://webhook.example.com" class="w-full px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-xs">
+            <input type="text" name="action_config_subject[]" x-show="['email', 'teams', 'notify'].includes(a.type)" placeholder="Subject, e.g. {{asset_tag}} is now {{status}} (optional)" class="w-full px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-xs">
+            <input type="text" name="action_config_message[]" x-show="['email', 'teams', 'notify'].includes(a.type)" placeholder="Message, e.g. Please follow up with {{assigned_to}} (optional)" class="w-full px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-xs">
+            <input type="text" name="action_config_msg[]" x-show="a.type === 'log'" x-cloak placeholder="Log message" class="w-full px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-xs">
+            <button type="button" @click="actions.splice(i, 1)" class="text-xs text-rose-400 hover:underline">Remove action</button>
+          </div>
+        </template>
+        <button type="button" @click="actions.push({ type: 'email' })" class="text-xs text-blue-400 hover:underline">+ Add action</button>
+        <p class="text-[11px] text-slate-500 mt-2">The asset / employee details are always included under your message. Use <span class="font-mono">{{field}}</span> to insert a value.</p>
+      </div>
+      <label class="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="is_active" value="1" checked class="rounded">Active</label>
+      <div class="flex justify-end gap-2">
+        <button type="button" @click="addOpen = false" class="px-4 py-2 rounded-xl bg-white/5 text-sm text-slate-300">Cancel</button>
+        <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-sm text-white font-medium">Create rule</button>
+      </div>
+    </form>
+  </div>
+</div>
+</div>

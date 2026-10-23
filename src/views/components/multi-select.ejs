@@ -1,0 +1,68 @@
+<%#
+  Multi-select dropdown that looks like the filter <select>s next to it. Ticked values are sent
+  as repeated `name` fields (?name=a&name=b) when the surrounding GET form is submitted.
+  Locals: name, placeholder ('All models'), noun ('models'), options [{ v, l }], selected [values],
+          title (optional tooltip). Lists longer than 8 get a search box.
+%>
+<div class="relative flex-1 min-w-[180px] max-w-xs" <% if (typeof title !== 'undefined' && title) { %>title="<%= title %>"<% } %>
+     x-data="hamsMultiSelect(<%= JSON.stringify({ options, selected: (selected || []).map(String), placeholder, noun }) %>)"
+     @click.outside="open = false" @keydown.escape="open = false">
+  <template x-for="v in sel" :key="v"><input type="hidden" name="<%= name %>" :value="v"></template>
+  <button type="button" @click="toggle()"
+          class="w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-xl bg-hams-bg border text-sm text-left"
+          :class="sel.length ? 'border-blue-500/50 text-white' : 'border-white/10'">
+    <span class="truncate" x-text="summary()"><%= (selected || []).length ? (selected.length + ' selected') : placeholder %></span>
+    <svg class="w-4 h-4 shrink-0 opacity-70 transition-transform" :class="open && 'rotate-180'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div x-show="open" x-cloak x-transition.origin.top.left
+       class="absolute left-0 top-full z-[70] mt-2 w-full min-w-[19rem] bg-hams-card border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+    <div class="p-3 border-b border-white/5">
+      <% if (options.length > 8) { %>
+      <input type="text" x-ref="q" x-model="q" @keydown.enter.prevent placeholder="Type to search <%= noun %>…"
+             class="w-full px-3 py-2 rounded-lg bg-hams-bg border border-white/10 text-sm outline-none focus:border-blue-500 mb-2">
+      <% } %>
+      <div class="flex items-center justify-between text-xs">
+        <button type="button" @click="selectShown()" x-show="shown().length" class="text-blue-400 hover:underline" x-text="q.trim() ? 'Select all ' + shown().length + ' shown' : 'Select all'"></button>
+        <button type="button" @click="sel = []" x-show="sel.length" class="text-slate-400 hover:text-white">Clear selection</button>
+      </div>
+    </div>
+    <div class="max-h-64 overflow-y-auto py-1">
+      <template x-for="o in shown()" :key="o.v">
+        <label class="flex items-center gap-3 px-4 py-2 text-sm cursor-pointer hover:bg-white/5" :class="sel.includes(o.v) && 'bg-blue-500/10'">
+          <input type="checkbox" :value="o.v" x-model="sel" class="rounded">
+          <span class="truncate" :class="sel.includes(o.v) ? 'text-white font-medium' : 'text-slate-200'" x-text="o.l"></span>
+        </label>
+      </template>
+      <p x-show="!shown().length" class="px-4 py-6 text-center text-xs text-slate-500">No <%= noun %> match.</p>
+    </div>
+    <div class="px-3 py-2.5 border-t border-white/5 flex items-center justify-between bg-white/[.02]">
+      <span class="text-xs text-slate-400" x-text="sel.length ? sel.length + ' selected' : 'None selected = ' + placeholder.toLowerCase()"></span>
+      <button type="button" @click="open = false" class="px-4 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs text-white font-medium">Done</button>
+    </div>
+  </div>
+</div>
+<script>
+window.hamsMultiSelect = window.hamsMultiSelect || function (cfg) {
+  var labels = {};
+  cfg.options.forEach(function (o) { labels[o.v] = o.l; });
+  return {
+    open: false, q: '', sel: cfg.selected.slice(), placeholder: cfg.placeholder,
+    toggle: function () { var self = this; this.open = !this.open; if (this.open) this.$nextTick(function () { if (self.$refs.q) self.$refs.q.focus(); }); },
+    shown: function () {
+      var q = this.q.trim().toLowerCase();
+      return q ? cfg.options.filter(function (o) { return o.l.toLowerCase().indexOf(q) >= 0; }) : cfg.options;
+    },
+    selectShown: function () {
+      var sel = this.sel;
+      this.shown().forEach(function (o) { if (sel.indexOf(o.v) < 0) sel.push(o.v); });
+    },
+    // "All models" / "5400" / "5400, Latitude 5400" / "3 models selected"
+    summary: function () {
+      var n = this.sel.length;
+      if (!n) return cfg.placeholder;
+      if (n <= 2) return this.sel.map(function (v) { return labels[v] || v; }).join(', ');
+      return n + ' ' + cfg.noun + ' selected';
+    }
+  };
+};
+</script>

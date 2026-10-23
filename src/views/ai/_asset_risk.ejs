@@ -1,0 +1,76 @@
+<%# Refresh risk and unusual-asset finding on the asset page (included only while "Refresh risk" or
+    "Unusual assets" is on). Loads after the page; estimates only, nothing is changed. %>
+<div x-data="aiAssetRisk()" x-init="load()" class="bg-hams-card border border-white/5 rounded-3xl p-6">
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+    <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="hourglass" class="w-4 h-4 text-blue-400"></i>Refresh risk &amp; findings</h2>
+    <span class="text-[11px] text-slate-500">AI estimate · nothing is changed</span>
+  </div>
+  <p x-show="!loaded" class="text-sm text-slate-500">Loading…</p>
+  <p x-show="loaded && failed" x-cloak class="text-sm text-slate-500">Not available right now.</p>
+
+  <div x-show="loaded && !failed && d.lifecycle" x-cloak>
+    <template x-if="d.lifecycle && !d.lifecycle.ready"><p class="text-sm text-slate-500 mb-4">The refresh-risk model has not been trained yet (Settings &gt; AI).</p></template>
+    <template x-if="d.lifecycle && d.lifecycle.ready && d.lifecycle.skip"><p class="text-sm text-slate-500 mb-4" x-text="d.lifecycle.skip"></p></template>
+    <template x-if="d.lifecycle && d.lifecycle.ready && !d.lifecycle.skip">
+      <div class="mb-5">
+        <div class="flex flex-wrap items-center gap-4 mb-4">
+          <div class="w-20 h-16 rounded-2xl flex flex-col items-center justify-center"
+               :class="d.lifecycle.label === 'high' ? 'bg-rose-500/10 text-rose-400' : (d.lifecycle.label === 'medium' ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400')">
+            <span class="text-xl font-bold font-heading" x-text="pct(d.lifecycle.risk12)"></span><span class="text-[10px]" x-text="d.lifecycle.label + ' risk'"></span>
+          </div>
+          <div class="min-w-0">
+            <div class="text-white font-medium" x-text="d.lifecycle.summary"></div>
+            <div class="text-xs text-slate-500" x-text="'Confidence: ' + sure(d.lifecycle.confidence) + ' · ' + d.lifecycle.category + ' · ' + d.lifecycle.age.toFixed(1) + ' years old'"></div>
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-3 mb-4">
+          <template x-for="h in [['6 months', d.lifecycle.risk6], ['12 months', d.lifecycle.risk12], ['24 months', d.lifecycle.risk24]]" :key="h[0]">
+            <div>
+              <div class="flex justify-between text-[11px] text-slate-500 mb-1"><span x-text="h[0]"></span><span class="text-slate-300" x-text="pct(h[1])"></span></div>
+              <div class="h-1.5 rounded-full bg-white/5 overflow-hidden"><div class="h-full rounded-full bg-blue-500" :style="'width:' + Math.max(2, h[1] * 100) + '%'"></div></div>
+            </div>
+          </template>
+        </div>
+        <div class="text-xs text-slate-500 mb-1">Why</div>
+        <ul class="space-y-1 text-sm text-slate-300 list-disc pl-5">
+          <template x-for="w in d.lifecycle.why" :key="w"><li x-text="w"></li></template>
+        </ul>
+        <p class="text-[11px] text-slate-500 mt-3" x-text="'Learnt from which assets of each age have been retired so far (retirement dates are not recorded, so this is an estimate). Model v' + d.lifecycle.model_version + '.'"></p>
+      </div>
+    </template>
+  </div>
+
+  <div x-show="loaded && !failed && d.anomaly" x-cloak class="pt-4 border-t border-white/5">
+    <template x-if="d.anomaly && !d.anomaly.scored"><p class="text-sm text-slate-500">Unusual-asset check: not run on this asset yet.</p></template>
+    <template x-if="d.anomaly && d.anomaly.scored && !d.anomaly.unusual"><p class="text-sm text-slate-400">Unusual-asset check: nothing unusual next to the other assets of its model.</p></template>
+    <template x-if="d.anomaly && d.anomaly.scored && d.anomaly.unusual">
+      <div class="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <span class="text-sm font-medium text-amber-300">Unusual for its model</span>
+          <span class="text-[11px] text-amber-300/80" x-text="'score ' + d.anomaly.score.toFixed(2) + ' · ' + sure(d.anomaly.confidence) + ' confidence'"></span>
+        </div>
+        <ul class="space-y-1 text-sm text-slate-300 list-disc pl-5">
+          <template x-for="w in d.anomaly.why" :key="w"><li x-text="w"></li></template>
+        </ul>
+        <a href="<%= hams_url('/alerts') %>#ai-anomalies" class="inline-block mt-2 text-xs text-blue-400 hover:text-blue-300">Review it on Alerts →</a>
+      </div>
+    </template>
+  </div>
+</div>
+<script>
+function aiAssetRisk() {
+  return {
+    loaded: false, failed: false, d: {},
+    pct(x) { return x >= 0.995 ? '>99%' : (x < 0.005 ? '<1%' : Math.round(x * 100) + '%'); },
+    sure(c) { return c >= 0.75 ? 'high' : (c >= 0.4 ? 'medium' : 'low'); },
+    async load() {
+      try {
+        const r = await fetch('<%= hams_url('/api/ai/assets/' + asset.id + '/risk') %>', { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error(r.status);
+        this.d = await r.json();
+      } catch (e) { this.failed = true; }
+      this.loaded = true;
+    }
+  };
+}
+</script>

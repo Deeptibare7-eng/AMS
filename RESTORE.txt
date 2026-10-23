@@ -1,0 +1,43 @@
+IT-HAMS - project copy with data (14 Oct 2026)
+==============================================
+
+Contents
+  - The application code and documents.
+  - database-dump/it_hams_v3.sql : the full database (all tables and rows) as of 14 Oct 2026:
+    26,736 Computing assets from "All PGS-25.9.26 (1).xlsx", 7,194 employees (by CTID),
+    25 locations, 461 purchase orders, settings and the admin account.
+  - Not included: node_modules (run "npm install") and .env (contains passwords; create it from .env.example).
+
+Requirements
+  - Node.js 18 or newer (tested on Node 24)
+  - PostgreSQL 16 (14+ should work)
+
+Restore
+  1. Unzip this folder anywhere.
+
+  2. Create the database and load the dump (asks for the postgres password):
+       createdb -U postgres it_hams_v3
+       psql -U postgres -d it_hams_v3 -f database-dump/it_hams_v3.sql
+     On Windows, run these from "C:\Program Files\PostgreSQL\16\bin" or add it to PATH.
+
+  3. Create the settings file:
+       copy .env.example .env        (Windows)
+       cp .env.example .env          (Linux / macOS)
+     Then edit .env:
+       DB_NAME=it_hams_v3
+       DB_USER / DB_PASS   = your PostgreSQL user and password
+       APP_PORT / APP_URL  = e.g. 3002 and http://localhost:3002
+       SESSION_SECRET      = any long random text, e.g. the output of
+                             node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+  4. Install packages and start:
+       npm install
+       npm start
+
+  5. Open APP_URL in a browser and sign in with the existing admin account
+     (admin@hams.inc) and its current password.
+
+Notes
+  - Imported employees have no email address yet; that is expected.
+  - Import Data (and the daily folder import) bring in only the Computing rows of the
+    Asset Data register; Accessories and Servers are left out.

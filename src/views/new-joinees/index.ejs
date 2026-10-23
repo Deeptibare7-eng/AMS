@@ -1,0 +1,271 @@
+<div x-data="njSection()">
+<div class="flex flex-wrap items-center justify-between gap-4 mb-8">
+  <div>
+    <h1 class="font-heading text-2xl md:text-3xl font-bold text-white">New Joinees</h1>
+    <p class="text-sm text-slate-500 mt-1">Onboarding asset allocation — the agent drafts the best laptop (Good before Acceptable: newer processor, in warranty) from the stock at the joinee's site, read from Machine Name; nothing is assigned until an engineer approves</p>
+  </div>
+  <div class="flex items-center gap-3">
+    <span class="px-2.5 py-1 rounded-lg bg-blue-500/10 text-blue-400 text-xs font-semibold flex items-center gap-1.5"><i data-lucide="bot" class="w-3.5 h-3.5"></i>Auto-allocation agent</span>
+    <% if (canImport) { %>
+    <button @click="importOpen = true" class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"><i data-lucide="upload" class="w-4 h-4"></i>Import Excel</button>
+    <% } %>
+  </div>
+</div>
+
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+  <div class="table-responsive">
+    <table class="w-full min-w-[1100px] text-sm">
+      <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
+        <th class="px-6 py-4">Name</th><th class="px-6 py-4">Employee ID</th><th class="px-6 py-4">Location</th><th class="px-6 py-4">Employment</th><th class="px-6 py-4">Date of Joining</th><th class="px-6 py-4">Designation</th><th class="px-6 py-4">Drafted Allocation</th><th class="px-6 py-4">Status</th><th class="px-6 py-4 text-right">Actions</th>
+      </tr></thead>
+      <tbody class="divide-y divide-white/5">
+        <% for (const j of newJoinees) { %>
+        <tr class="hover:bg-white/[.02]">
+          <td class="px-6 py-4">
+            <div class="flex items-center gap-3">
+              <img src="<%= avatarUrl(j.name, '#6366f1') %>" class="w-9 h-9 rounded-xl" alt="">
+              <span class="font-medium text-white"><%= j.name %></span>
+            </div>
+          </td>
+          <td class="px-6 py-4 text-slate-400"><%= j.employee_id %></td>
+          <td class="px-6 py-4 text-slate-400"><%= j.location_name || 'Global' %>
+            <div class="text-[11px] mt-1 <%= j.site ? 'text-slate-500' : 'text-amber-400/80' %>">Stock: <%= j.site || 'no stock site for this location' %></div>
+            <div class="text-[11px] mt-1 <%= j.spoc_names ? 'text-slate-500' : 'text-amber-400/80' %>">SPOC: <%= j.spoc_names || 'not set' %></div>
+          </td>
+          <td class="px-6 py-4"><span class="px-2.5 py-1 rounded-lg text-xs <%= j.employment_status === 'Contractor' ? 'bg-purple-500/10 text-purple-400' : 'bg-sky-500/10 text-sky-400' %>"><%= j.employment_status %></span></td>
+          <td class="px-6 py-4 text-slate-400"><%= formatDate(j.date_of_joining) %></td>
+          <td class="px-6 py-4"><span class="px-2.5 py-1 rounded-lg bg-indigo-500/10 text-indigo-400 text-xs"><%= j.designation %></span></td>
+          <td class="px-6 py-4">
+            <% if (j.laptop_model) { %>
+            <div class="text-slate-300 flex items-center gap-1.5"><i data-lucide="laptop" class="w-3.5 h-3.5 text-slate-500"></i><%= j.laptop_model %> <span class="text-slate-500 text-xs"><%= j.laptop_tag %></span></div>
+            <% if (j.laptop && j.allocation_status !== 'allocated') { %><div class="text-[11px] mt-0.5 <%= j.laptop.grade === 'good' ? 'text-emerald-400/90' : 'text-amber-400/90' %>"><%= j.laptop.summary %></div><% } %>
+            <% } else { %>
+            <div class="text-amber-400/90 flex items-center gap-1.5"><i data-lucide="laptop" class="w-3.5 h-3.5"></i><%= j.site ? 'No usable laptop in ' + j.site + ' stock' : 'No stock site for ' + (j.location_name || 'this location') %></div>
+            <% } %>
+            <% if (j.headphone_name) { %>
+            <div class="text-slate-400 text-xs mt-1 flex items-center gap-1.5"><i data-lucide="headphones" class="w-3.5 h-3.5 text-slate-500"></i><%= j.headphone_name %></div>
+            <% } else { %>
+            <div class="text-amber-400/90 text-xs mt-1 flex items-center gap-1.5"><i data-lucide="headphones" class="w-3.5 h-3.5"></i>Headphones not available at <%= j.location_name || 'this location' %></div>
+            <% } %>
+            <% if (j.draft_note) { %><div class="text-[11px] text-slate-500 mt-1"><%= j.draft_note %></div><% } %>
+          </td>
+          <td class="px-6 py-4">
+            <% if (j.allocation_status === 'allocated') { %>
+            <span class="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-semibold">ALLOCATED</span>
+            <% if (j.allocated_by_name) { %><div class="text-[11px] text-slate-500 mt-1">by <%= j.allocated_by_name %></div><% } %>
+            <% } else { %>
+            <span class="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 text-xs font-semibold">AWAITING APPROVAL</span>
+            <% } %>
+          </td>
+          <td class="px-6 py-4">
+            <% if (j.allocation_status !== 'allocated') { %>
+            <div class="flex justify-end gap-2">
+              <button @click="openEdit(NJ_DATA[<%= j.id %>])" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-xs"><i data-lucide="edit-3" class="w-3.5 h-3.5"></i>Edit</button>
+              <% if (j.draft_laptop_asset_id) { %>
+              <button @click="openPreview(<%= j.id %>)" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 text-xs" title="Preview the allocation email"><i data-lucide="mail" class="w-3.5 h-3.5"></i>Email</button>
+              <% } %>
+              <% if (canImport) { %>
+              <form method="POST" action="<%= hams_url('/new-joinees/' + j.id + '/remove') %>" onsubmit="return confirm(<%= JSON.stringify('Remove ' + j.name + ' (' + j.employee_id + ') from New Joinees? Their details and pending account will be deleted and nothing is allocated.') %>)">
+                <%- csrf_field %>
+                <button type="submit" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i>Remove</button>
+              </form>
+              <% } %>
+              <form method="POST" action="<%= hams_url('/new-joinees/' + j.id + '/allocate') %>" onsubmit="return confirm(<%= JSON.stringify('Allocate the drafted laptop' + (j.draft_headphone_accessory_id ? ' and headphones' : ' (no headphones available — laptop only)') + ' to ' + j.name + '? This finalizes the assignment and emails the joinee.') %>)">
+                <%- csrf_field %>
+                <button type="submit" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed" <%= !j.draft_laptop_asset_id ? 'disabled' : '' %>><i data-lucide="check" class="w-3.5 h-3.5"></i>Allocate</button>
+              </form>
+            </div>
+            <% } else { %>
+            <div class="text-right text-xs text-slate-500"><%= formatDate(j.allocated_at) %></div>
+            <% const es = j.email_status; %>
+            <div class="flex items-center justify-end gap-2 mt-1.5">
+              <span class="px-2 py-0.5 rounded text-[11px] <%= es === 'sent' ? 'bg-emerald-500/10 text-emerald-400' : es ? 'bg-rose-500/10 text-rose-400' : 'bg-white/5 text-slate-500' %>"
+                    title="<%= es === 'sent' ? 'Sent to ' + j.email_to : (j.email_error || 'No email attempted') %>"><i data-lucide="mail" class="w-3 h-3 inline -mt-0.5"></i> <%= es === 'sent' ? 'Email sent' : es === 'failed' ? 'Email failed' : es === 'skipped' ? 'Email not sent' : 'No email' %></span>
+              <button @click="openPreview(<%= j.id %>)" class="text-[11px] text-blue-400 hover:underline">Preview</button>
+              <% if (es !== 'sent' && canImport) { %>
+              <form method="POST" action="<%= hams_url('/new-joinees/' + j.id + '/email') %>">
+                <%- csrf_field %>
+                <button class="text-[11px] text-blue-400 hover:underline">Resend</button>
+              </form>
+              <% } %>
+            </div>
+            <% } %>
+          </td>
+        </tr>
+        <% } %>
+        <% if (!newJoinees.length) { %><tr><td colspan="9" class="px-6 py-12 text-center text-slate-500">No new joinees.</td></tr><% } %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<% if (canImport) { %>
+<!-- Import joinees modal -->
+<div x-show="importOpen" x-cloak class="fixed inset-0 z-[90] flex items-start justify-center px-4 py-8 overflow-y-auto">
+  <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="importOpen = false"></div>
+  <div class="relative bg-hams-card border border-white/10 rounded-3xl p-6 w-full max-w-lg">
+    <h3 class="font-heading font-semibold text-white mb-1">Import New Joinees</h3>
+    <p class="text-xs text-slate-500 mb-4">Upload one Excel (.xlsx) file with two sheets: <span class="text-slate-300">New Joinee details</span> and <span class="text-slate-300">Location SPOC details</span>. Joinees are added (or updated, if not yet allocated) and the agent drafts the best laptop from the stock at each joinee's site, plus headphones where in stock. Nothing is assigned until an engineer clicks Allocate; the joinee is then emailed with the location SPOC in CC.</p>
+    <form method="POST" action="<%= hams_url('/new-joinees/import') %>" enctype="multipart/form-data" class="space-y-4">
+      <%- csrf_field %>
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">File *</label>
+        <input type="file" name="file" accept=".xlsx,.csv" required class="w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm text-slate-300">
+      </div>
+      <div class="text-xs text-slate-500 leading-relaxed">
+        <b class="text-slate-400">New Joinee details:</b> <span class="text-slate-300">Employee ID, Name, Designation, Location</span> (required), Email, Employment Status, Date of Joining.<br>
+        <b class="text-slate-400">Location SPOC details:</b> <span class="text-slate-300">Location, SPOC Name, SPOC Email</span> (required), Contact Number — replaces the SPOC list of each location in the sheet.<br>
+        Locations must match exactly — the template lists them with their stock site and usable laptops.
+      </div>
+      <div class="flex items-center justify-between gap-3 pt-2">
+        <a href="<%= hams_url('/new-joinees/import/template') %>" class="flex items-center gap-1.5 text-xs text-blue-400 hover:underline"><i data-lucide="download" class="w-3.5 h-3.5"></i>Download template</a>
+        <div class="flex gap-2">
+          <button type="button" @click="importOpen = false" class="px-4 py-2 rounded-xl bg-white/5 text-sm text-slate-300">Cancel</button>
+          <button class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium">Import</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+<% } %>
+
+<!-- Allocation email preview (nothing is sent from here) -->
+<div x-show="previewOpen" x-cloak class="fixed inset-0 z-[95] flex items-start justify-center px-4 py-8 overflow-y-auto">
+  <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="previewOpen = false"></div>
+  <div class="relative bg-hams-card border border-white/10 rounded-3xl p-6 w-full max-w-2xl">
+    <div class="flex items-start justify-between gap-4 mb-4">
+      <div>
+        <h3 class="font-heading font-semibold text-white">Allocation email preview</h3>
+        <p class="text-xs text-slate-500">Exactly what the employee receives. Nothing is sent from this window.</p>
+      </div>
+      <button @click="previewOpen = false" class="text-slate-500 hover:text-white text-xl leading-none">&times;</button>
+    </div>
+    <div x-show="previewLoading" class="text-sm text-slate-400 py-8 text-center">Loading…</div>
+    <div x-show="previewError" class="text-sm text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-xl px-4 py-3" x-text="previewError"></div>
+    <template x-if="preview">
+      <div>
+        <div class="mb-4 rounded-xl px-4 py-3 text-xs border"
+             :class="preview.willSend ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'">
+          <span x-show="preview.willSend" x-text="preview.allocated ? 'Email is configured — Resend will deliver this message.' : 'Email is configured — this message will be sent when you click Allocate.'"></span>
+          <span x-show="!preview.willSend" x-text="'Will not be sent yet: ' + (!preview.smtpReady ? preview.smtpReason + '. An admin can set this up under Settings → Notifications.' : 'the employee has no email address yet — add it by re-importing their row.')"></span>
+        </div>
+        <dl class="text-sm divide-y divide-white/5 border border-white/10 rounded-xl mb-4">
+          <div class="flex gap-3 px-4 py-2"><dt class="w-16 text-slate-500 shrink-0">To</dt><dd class="text-white break-all" x-text="preview.to"></dd></div>
+          <div class="flex gap-3 px-4 py-2"><dt class="w-16 text-slate-500 shrink-0">CC</dt>
+            <dd class="break-all"><span class="text-white" x-text="preview.cc.length ? preview.cc.join(', ') : '—'"></span>
+              <span class="block text-[11px] mt-0.5" :class="preview.ccSource === 'spoc' ? 'text-slate-500' : 'text-amber-400/90'"
+                    x-text="({ spoc: 'Location SPOC(s)',
+                               engineer_spoc_no_email: 'The SPOCs for this location have no email yet (they are listed in the email with their phone) — the allocating engineer is CC\'d instead. Add their email under Administration → Location SPOCs.',
+                               engineer: 'No SPOC saved for this location — the allocating engineer is CC\'d instead. Add one under Administration → Location SPOCs.' })[preview.ccSource] || 'No SPOC saved for this location'"></span></dd></div>
+          <div class="flex gap-3 px-4 py-2"><dt class="w-16 text-slate-500 shrink-0">Subject</dt><dd class="text-white" x-text="preview.subject"></dd></div>
+        </dl>
+        <div class="rounded-xl bg-white p-5 max-h-[50vh] overflow-y-auto" x-html="preview.html"></div>
+        <div class="flex justify-end mt-4">
+          <button @click="previewOpen = false" class="px-4 py-2 rounded-xl bg-white/5 text-sm text-slate-300">Close</button>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+
+<!-- Edit allocation modal (location-scoped dropdowns) -->
+<div x-show="editOpen" x-cloak class="fixed inset-0 z-[90] flex items-start justify-center px-4 py-8 overflow-y-auto">
+  <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="editOpen = false"></div>
+  <div class="relative bg-hams-card border border-white/10 rounded-3xl p-6 w-full max-w-lg">
+    <h3 class="font-heading font-semibold text-white mb-1">Edit Allocation</h3>
+    <p class="text-xs text-slate-500 mb-4" x-text="joinee ? joinee.name + ' · ' + joinee.designation + ' · ' + joinee.locationName + ' — agent recommendation: ' + joinee.ruleLabel : ''"></p>
+    <form method="POST" :action="joinee ? njUrl + joinee.id + '/allocation' : '#'" class="space-y-4">
+      <%- csrf_field %>
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">Laptop * <span class="text-slate-500 font-normal" x-text="joinee ? (joinee.site ? '(' + joinee.site + ' stock, best first)' : '(no stock site for ' + joinee.locationName + ')') : ''"></span></label>
+        <select name="laptop_asset_id" x-model="laptopId" required class="w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm">
+          <template x-if="!laptopChoices().length"><option value="" disabled selected>Asset not available</option></template>
+          <template x-for="l in laptopChoices()" :key="l.id">
+            <option :value="String(l.id)" x-text="l.model + ' — ' + l.tag + ' · ' + l.detail + (l.premium ? ' · Premium' : '')"></option>
+          </template>
+        </select>
+        <label x-show="joinee && joinee.premiumOnly && laptopChoices(true).length" class="mt-2 flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
+          <input type="checkbox" x-model="exception" class="rounded border-white/10 bg-hams-bg">
+          Exception — show all usable laptops at this site (not only premium)
+        </label>
+        <p x-show="joinee && joinee.premiumOnly && !exception && laptopChoices().length" class="mt-1 text-[11px] text-slate-500">Showing premium laptops only (designation-based). Use the exception toggle to see every usable laptop at this site.</p>
+        <p x-show="joinee && !laptopChoices(true).length" class="mt-1 text-[11px] text-amber-400/90" x-text="joinee && joinee.site ? 'No usable laptops in ' + joinee.site + ' stock (returned-to-client, reserved, faulty and old laptops are not offered).' : 'This location has no stock site, so no laptop can be offered.'"></p>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1.5">Headphones <span class="text-slate-500 font-normal" x-text="joinee ? '(available at ' + joinee.locationName + ')' : ''"></span></label>
+        <select name="headphone_accessory_id" x-model="headphoneId" :required="headphoneChoices().length > 0" class="w-full px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm">
+          <template x-if="!headphoneChoices().length"><option value="" selected>None in stock — laptop only</option></template>
+          <template x-for="h in headphoneChoices()" :key="h.id">
+            <option :value="String(h.id)" x-text="h.name + (h.model ? ' — ' + h.model : '') + ' · ' + h.available + ' in stock'"></option>
+          </template>
+        </select>
+        <p x-show="joinee && !headphoneChoices().length" class="mt-1 text-[11px] text-amber-400/90">No headphones in stock here; the laptop can be allocated on its own.</p>
+      </div>
+      <div class="flex justify-end gap-2">
+        <button type="button" @click="editOpen = false" class="px-4 py-2 rounded-xl bg-white/5 text-sm text-slate-300">Cancel</button>
+        <button type="submit" :disabled="!laptopChoices().length" class="px-4 py-2 rounded-xl bg-blue-600 text-sm text-white font-medium disabled:opacity-40 disabled:cursor-not-allowed">Save Draft</button>
+      </div>
+    </form>
+  </div>
+</div>
+</div>
+
+<script>
+var NJ_LAPTOPS = <%- safeJson(allocationOptions.laptops) %>;
+var NJ_HEADPHONES = <%- safeJson(allocationOptions.headphones) %>;
+var NJ_DATA = <%- safeJson(Object.fromEntries(newJoinees.map(j => [j.id, {
+  id: j.id, name: j.name, designation: j.designation,
+  locationId: j.location_id, locationName: j.location_name || 'this location', site: j.site,
+  premiumOnly: j.rule.premiumOnly, ruleLabel: j.rule.label,
+  laptopId: j.draft_laptop_asset_id, headphoneId: j.draft_headphone_accessory_id
+}]))) %>;
+function njSection() {
+  return {
+    editOpen: false,
+    importOpen: false,
+    previewOpen: false, previewLoading: false, preview: null, previewError: '',
+    async openPreview(id) {
+      this.previewOpen = true; this.previewLoading = true; this.preview = null; this.previewError = '';
+      try {
+        const r = await fetch(this.njUrl + id + '/email/preview', { headers: { Accept: 'application/json' } });
+        const j = await r.json();
+        if (j.ok) this.preview = j; else this.previewError = j.message || 'Could not build the email preview.';
+      } catch (e) { this.previewError = 'Could not load the email preview.'; }
+      this.previewLoading = false;
+    },
+    joinee: null,
+    laptopId: '',
+    headphoneId: '',
+    exception: false,
+    njUrl: <%- safeJson(hams_url('/new-joinees/')) %>,
+    openEdit(j) {
+      this.joinee = j;
+      this.exception = false;
+      var laptops = this.laptopChoices();
+      var headphones = this.headphoneChoices();
+      this.laptopId = j.laptopId ? String(j.laptopId) : (laptops[0] ? String(laptops[0].id) : '');
+      this.headphoneId = j.headphoneId ? String(j.headphoneId) : (headphones[0] ? String(headphones[0].id) : '');
+      this.editOpen = true;
+    },
+    // Site-scoped laptops: only usable stock at the joinee's site (from Machine Name),
+    // already ranked best first. On top of that, premium designations see premium
+    // machines only until the exception toggle widens to all laptops at that site.
+    // Pass all=true to bypass the premium filter (used to decide whether the
+    // exception toggle is worth showing).
+    laptopChoices(all) {
+      if (!this.joinee || !this.joinee.site) return [];
+      var site = this.joinee.site;
+      var atSite = NJ_LAPTOPS.filter(function(l) { return l.site === site; });
+      if (all || !this.joinee.premiumOnly || this.exception) return atSite;
+      var sel = this.laptopId;
+      return atSite.filter(function(l) { return l.premium || String(l.id) === sel; });
+    },
+    // Location-scoped headphones.
+    headphoneChoices() {
+      if (!this.joinee) return [];
+      var loc = this.joinee.locationId;
+      return NJ_HEADPHONES.filter(function(h) { return h.locationId === loc; });
+    }
+  };
+}
+</script>

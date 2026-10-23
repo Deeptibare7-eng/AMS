@@ -1,0 +1,72 @@
+<%# Ctrl+K: asset results from smart search (included only while "Smart search" is on and the user can
+    see Hardware). Lives inside the palette, so it reads the palette's `open` and `query`.
+    Up / Down pick a result, Enter opens it. %>
+<div x-data="aiPaletteSearch()" x-effect="lookup(query, open && !ask)" @keydown.window="key($event, open && !ask)">
+  <div x-show="q.length >= 2" class="border-b border-white/5 pb-2">
+    <div class="p-3 px-5 text-xs text-slate-500 uppercase tracking-wider flex items-center justify-between gap-3">
+      <span class="flex items-center gap-1.5"><i data-lucide="sparkles" class="w-3.5 h-3.5 text-blue-400"></i>Assets</span>
+      <span x-show="loading" class="normal-case tracking-normal">Searching&hellip;</span>
+      <a x-show="!loading && total > 0" :href="allUrl" class="normal-case tracking-normal text-blue-400 hover:text-blue-300"
+         x-text="'All ' + total.toLocaleString('en-IN') + ' in Hardware'"></a>
+    </div>
+    <template x-for="(h, i) in hits" :key="h.id">
+      <a :href="h.url" @mouseenter="active = i" class="block px-5 py-2 text-sm" :class="active === i ? 'bg-white/5' : ''">
+        <span class="flex items-center gap-2">
+          <span class="text-white font-medium truncate" x-text="h.name"></span>
+          <span class="text-[11px] text-slate-500 font-mono shrink-0" x-text="h.tag"></span>
+          <span x-show="h.match !== null" class="ml-auto shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-semibold"
+                :class="h.match >= 0.9 ? 'bg-emerald-500/10 text-emerald-400' : (h.match >= 0.7 ? 'bg-sky-500/10 text-sky-400' : 'bg-amber-500/10 text-amber-400')"
+                x-text="Math.round(h.match * 100) + '% match'"></span>
+        </span>
+        <span class="block text-[11px] text-slate-400 truncate" x-text="[h.model, h.status, h.holder, h.site].filter(Boolean).join(' · ')"></span>
+        <span class="block text-[11px] text-slate-500 truncate" x-text="'Why: ' + h.why.join('; ')"></span>
+      </a>
+    </template>
+    <div x-show="!loading && !hits.length" class="px-5 pb-2 text-xs text-slate-500">No asset matches.</div>
+    <div x-show="notes.length" class="px-5 pt-1 text-[11px] text-slate-500" x-text="notes.join(' · ')"></div>
+  </div>
+</div>
+<script>
+function aiPaletteSearch() {
+  return {
+    q: '', hits: [], total: 0, allUrl: '', notes: [], loading: false, active: 0, timer: null, seq: 0,
+    lookup(query, open) {
+      const q = open ? String(query || '').trim() : '';
+      if (q === this.q) return;
+      this.q = q;
+      clearTimeout(this.timer);
+      this.seq++;
+      if (q.length < 2) { this.hits = []; this.total = 0; this.notes = []; this.loading = false; return; }
+      this.loading = true;
+      this.timer = setTimeout(() => this.load(q), 180);
+    },
+    async load(q) {
+      const mine = ++this.seq;
+      try {
+        const res = await fetch('<%= hams_url('/api/ai/search') %>?q=' + encodeURIComponent(q), { headers: { Accept: 'application/json' } });
+        if (mine !== this.seq) return;
+        const d = res.ok ? await res.json() : {};
+        if (mine !== this.seq) return;
+        this.hits = d.hits || [];
+        this.total = d.total || 0;
+        this.allUrl = d.all_url || '';
+        this.notes = d.banner ? [...d.banner.lines, d.banner.partial].filter(Boolean) : [];
+        this.active = 0;
+      } catch (_) {
+        if (mine === this.seq) this.hits = [];
+      }
+      if (mine === this.seq) this.loading = false;
+    },
+    key(e, open) {
+      if (!open || !this.hits.length) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.active = (this.active + (e.key === 'ArrowDown' ? 1 : -1) + this.hits.length) % this.hits.length;
+      } else if (e.key === 'Enter' && this.hits[this.active]) {
+        e.preventDefault();
+        window.location.href = this.hits[this.active].url;
+      }
+    }
+  };
+}
+</script>

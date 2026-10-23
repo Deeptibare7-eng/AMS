@@ -1,0 +1,100 @@
+<%# AI intake suggestions on Register Asset (included only while "Intake suggestions" is on).
+    Reads the form's own fields; fills a field only when the user clicks "Use". %>
+<div x-data="aiIntake()" x-init="init()" x-show="ready && (items.length || dups.length)" x-cloak
+     class="bg-hams-card border border-blue-500/20 rounded-3xl p-6">
+  <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+    <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="sparkles" class="w-4 h-4 text-blue-400"></i>AI suggestions</h2>
+    <span class="text-[11px] text-slate-500">Nothing is filled in until you click Use.</span>
+  </div>
+
+  <template x-if="dups.length">
+    <div class="mb-4 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-sm">
+      <div class="font-medium text-amber-300 mb-2 flex items-center gap-2"><i data-lucide="copy" class="w-4 h-4"></i>Possible duplicate</div>
+      <template x-for="d in dups" :key="d.id">
+        <div class="text-slate-300 text-xs mb-1">
+          <a :href="'<%= hams_url('/assets/') %>' + d.id" target="_blank" class="text-blue-400 hover:text-blue-300" x-text="d.asset_tag"></a>
+          <span x-text="' ' + d.name + (d.status ? ' (' + d.status + ')' : '') + ': ' + d.reason"></span>
+        </div>
+      </template>
+      <div x-show="hidden" class="text-[11px] text-slate-500" x-text="hidden + ' more outside your locations'"></div>
+    </div>
+  </template>
+
+  <div class="space-y-2">
+    <template x-for="s in items" :key="s.field">
+      <div class="flex flex-wrap items-center gap-3 p-3 rounded-2xl bg-white/[.03] border border-white/5">
+        <div class="min-w-[7rem] text-xs text-slate-500" x-text="labels[s.field] || s.field"></div>
+        <div class="flex-1 min-w-[10rem]">
+          <div class="text-sm text-white font-medium" x-text="s.label"></div>
+          <div class="text-[11px] text-slate-500" x-text="'Why: ' + s.why.join('; ')"></div>
+        </div>
+        <span class="px-2 py-0.5 rounded-lg text-[11px] font-semibold"
+              :class="s.confidence >= 0.8 ? 'bg-emerald-500/10 text-emerald-400' : (s.confidence >= 0.6 ? 'bg-sky-500/10 text-sky-400' : 'bg-amber-500/10 text-amber-400')"
+              x-text="(s.confidence >= 0.995 ? '>99' : Math.round(s.confidence * 100)) + '% sure'"></span>
+        <button type="button" @click="apply(s)" :disabled="s.applied"
+                class="px-3 py-1.5 rounded-xl text-xs font-medium"
+                :class="s.applied ? 'bg-white/5 text-slate-500' : 'bg-blue-600 hover:bg-blue-500 text-white'"
+                x-text="s.applied ? 'Used' : 'Use'"></button>
+      </div>
+    </template>
+  </div>
+</div>
+
+<script>
+function aiIntake() {
+  const LABELS = { category_id: 'Category', manufacturer_id: 'Manufacturer', asset_model_id: 'Asset model', supplier_id: 'Supplier', warranty_months: 'Warranty', purchase_cost: 'Purchase cost' };
+  const WATCH = ['name', 'model_number', 'serial_number', 'manufacturer_id', 'asset_model_id', 'location_id', 'cf_FAMS No. / Barcode', 'cf_Machine Name'];
+  return {
+    ready: false, items: [], dups: [], hidden: 0, labels: LABELS, form: null, timer: null, seq: 0,
+    init() {
+      this.form = this.$el.closest('form');
+      const onChange = e => { if (e.target && WATCH.includes(e.target.name)) { clearTimeout(this.timer); this.timer = setTimeout(() => this.refresh(), 450); } };
+      this.form.addEventListener('input', onChange);
+      this.form.addEventListener('change', onChange);
+    },
+    field(name) { return this.form.elements.namedItem(name); },
+    val(name) { const el = this.field(name); return el ? String(el.value || '').trim() : ''; },
+    async refresh() {
+      const my = ++this.seq;
+      const q = new URLSearchParams({ name: this.val('name'), model_number: this.val('model_number'), serial_number: this.val('serial_number'),
+        manufacturer_id: this.val('manufacturer_id'), asset_model_id: this.val('asset_model_id'), location_id: this.val('location_id') });
+      const d = new URLSearchParams({ serial_number: this.val('serial_number'), fams: this.val('cf_FAMS No. / Barcode'), machine_name: this.val('cf_Machine Name') });
+      try {
+        const [s, dup] = await Promise.all([
+          fetch('<%= hams_url('/api/ai/intake/suggest') %>?' + q, { headers: { Accept: 'application/json' } }).then(r => (r.ok ? r.json() : null)),
+          fetch('<%= hams_url('/api/ai/intake/duplicates') %>?' + d, { headers: { Accept: 'application/json' } }).then(r => (r.ok ? r.json() : null))
+        ]);
+        if (my !== this.seq) return; // a newer request is on its way
+        this.ready = true;
+        this.items = (s && s.ready ? s.suggestions : []).filter(x => this.current(x) !== String(x.value)).map(x => ({ ...x, applied: false }));
+        this.dups = dup ? dup.duplicates : [];
+        this.hidden = dup ? dup.hidden : 0;
+        this.$nextTick(() => window.lucide && window.lucide.createIcons());
+      } catch (e) { /* suggestions are optional: ignore network errors */ }
+    },
+    current(s) {
+      if (s.field === 'warranty_months') return '';
+      return this.val(s.field);
+    },
+    apply(s) {
+      if (s.field === 'warranty_months') {
+        const start = this.val('purchase_date') ? new Date(this.val('purchase_date') + 'T00:00:00Z') : new Date();
+        const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + Number(s.value), start.getUTCDate()));
+        this.setValue('warranty_expiry', end.toISOString().slice(0, 10));
+      } else {
+        const el = this.field(s.field);
+        if (!el) return;
+        if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === String(s.value))) return;
+        this.setValue(s.field, String(s.value));
+      }
+      s.applied = true;
+    },
+    setValue(name, value) {
+      const el = this.field(name);
+      if (!el) return;
+      el.value = value;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+}
+</script>

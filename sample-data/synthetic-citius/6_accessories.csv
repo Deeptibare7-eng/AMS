@@ -1,0 +1,9 @@
+name,model_number,manufacturer,category,location,total_qty,assigned_qty,user,min_qty,notes
+Logitech MX Master 3S Mouse,,Logitech,Accessory,CT Bangalore SEZ,80,0,,12,
+Logitech MX Keys Keyboard,,Logitech,Accessory,CitiusTech Hyderabad,70,0,,10,
+Dell WD19S USB-C Dock,,Dell,Accessory,CT Mindspace-1,60,0,,9,
+Lenovo USB-C Dock Gen2,,Lenovo,Accessory,Wilco Source Hyderabad,45,12,myra.kulkarni@northwind-hls.example,6,
+Logitech C920 Webcam,,Logitech,Accessory,CitiusTech Noida,50,0,,7,
+Anker 7-in-1 USB-C Hub,,Anker,Accessory,CitiusTech Canada,90,0,,13,
+Kensington Laptop Lock,,Kensington,Accessory,CitiusTech Gurugram,120,40,robert.garcia@northwind-hls.example,18,
+Jabra Speak 750 Speakerphone,,Jabra,Accessory,CitiusTech Chennai SEZ,20,0,,3,

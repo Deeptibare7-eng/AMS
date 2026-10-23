@@ -1,0 +1,72 @@
+<%# Ctrl+K: Ask mode (included only while "Questions in plain language" is on and the user can see
+    Hardware). Lives inside the palette, so it reads and sets the palette's `open`, `query` and `ask`.
+    Enter asks; the answer shows what was understood, how sure it is and why, with a link to the list. %>
+<div x-data="aiPaletteAsk()" @keydown.window="key($event, open, ask, query)" x-effect="reset(query, open, ask)">
+  <div class="px-5 py-2 border-b border-white/5 flex items-center gap-2 text-xs">
+    <div class="flex shrink-0 rounded-lg overflow-hidden border border-white/10" role="group" aria-label="Search or ask">
+      <button type="button" @click="ask = false; $refs.searchInput.focus()" class="px-2.5 py-1" :class="ask ? 'text-slate-400 hover:bg-white/5' : 'bg-white/10 text-white'">Search</button>
+      <button type="button" @click="ask = true; $refs.searchInput.focus()" class="px-2.5 py-1 flex items-center gap-1" :class="ask ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-white/5'"><i data-lucide="message-circle-question" class="w-3.5 h-3.5"></i>Ask</button>
+    </div>
+    <span x-show="ask" class="text-slate-500">Ask about the assets, then press Enter. It only finds and explains; it never changes anything.</span>
+  </div>
+  <div x-show="ask && (loading || r)" class="border-b border-white/5 px-5 py-3 text-sm">
+    <div x-show="loading" class="text-xs text-slate-500">Thinking&hellip;</div>
+    <template x-if="r && !loading">
+      <div>
+        <div class="text-slate-100" x-text="r.answer"></div>
+        <div x-show="r.chips && r.chips.length" class="mt-2 flex flex-wrap gap-1.5">
+          <template x-for="c in r.chips" :key="c.label"><span class="px-2 py-0.5 rounded-lg bg-white/5 text-[11px] text-slate-300" x-text="c.label"></span></template>
+        </div>
+        <div x-show="r.items && r.items.length" class="mt-2">
+          <template x-for="it in r.items" :key="it.id">
+            <a :href="it.url" class="block py-1 text-xs hover:text-white text-slate-300 truncate"><span class="font-mono text-slate-500" x-text="it.tag"></span> <span x-text="it.name"></span><span class="text-slate-500" x-text="[it.holder, it.status].filter(Boolean).length ? ' · ' + [it.holder, it.status].filter(Boolean).join(' · ') : ''"></span></a>
+          </template>
+        </div>
+        <div class="mt-2 text-[11px] text-slate-500" x-text="'Why: ' + (r.why || []).join('; ')"></div>
+        <div class="mt-2 flex items-center gap-3 text-xs">
+          <span class="px-1.5 py-0.5 rounded-md text-[10px] font-semibold"
+                :class="r.confidence >= 0.8 ? 'bg-emerald-500/10 text-emerald-400' : (r.confidence >= 0.5 ? 'bg-sky-500/10 text-sky-400' : 'bg-amber-500/10 text-amber-400')"
+                x-text="Math.round((r.confidence || 0) * 100) + '% sure'"></span>
+          <a x-show="r.link" :href="r.link" class="text-blue-400 hover:text-blue-300" x-text="(r.total !== undefined ? 'Open the list' : 'Open') + ' (Enter)'"></a>
+          <button type="button" x-show="!sent" @click="miss()" class="ml-auto text-slate-500 hover:text-slate-300 underline">Not what I meant</button>
+          <span x-show="sent" class="ml-auto text-slate-500">Kept, thanks.</span>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+<script>
+function aiPaletteAsk() {
+  return {
+    r: null, asked: '', loading: false, sent: false, seq: 0,
+    reset(query, open, ask) {
+      if (!open || !ask || String(query || '').trim() !== this.asked) { this.r = null; this.sent = false; this.seq++; this.loading = false; }
+    },
+    async go(q) {
+      const mine = ++this.seq;
+      this.asked = q; this.loading = true; this.sent = false;
+      try {
+        const res = await fetch('<%= hams_url('/api/ai/ask') %>?q=' + encodeURIComponent(q), { headers: { Accept: 'application/json' } });
+        const d = res.ok ? await res.json() : { answer: 'Questions are not available right now.' };
+        if (mine === this.seq) this.r = d;
+      } catch (_) {
+        if (mine === this.seq) this.r = { answer: 'Questions are not available right now.' };
+      }
+      if (mine === this.seq) this.loading = false;
+    },
+    key(e, open, ask, query) {
+      if (!open || !ask || e.key !== 'Enter') return;
+      e.preventDefault();
+      const q = String(query || '').trim();
+      if (this.r && !this.loading && q === this.asked && this.r.link) { window.location.href = this.r.link; return; }
+      if (q.length >= 2) this.go(q);
+    },
+    async miss() {
+      const token = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+      const body = new URLSearchParams({ _csrf: token, q: this.asked, ajax: '1' });
+      try { await fetch('<%= hams_url('/ai/ask/miss') %>', { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' } }); } catch (_) { /* best effort */ }
+      this.sent = true;
+    }
+  };
+}
+</script>

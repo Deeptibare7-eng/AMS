@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Multi-select filter option (components/multiselect.ejs): one short class keeps long option lists light. */
+@layer components {
+  .ms-opt { @apply flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-slate-300 cursor-pointer; }
+  .ms-opt:hover { @apply bg-white/5; }
+}

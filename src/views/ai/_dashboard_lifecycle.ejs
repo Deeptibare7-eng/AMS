@@ -1,0 +1,82 @@
+<%# Refresh risk on the dashboard (included only while "Refresh risk" is on). Loads after the page.
+    Heatmap: Asset Location x age; each cell = assets expected to be retired in the next 12 months
+    (sum of their risks), shaded by their average risk (one hue, light to dark). %>
+<div x-data="aiLifecycleCard()" x-init="load()" x-show="d && d.ready" x-cloak class="bg-hams-card border border-white/5 rounded-3xl p-6 mb-6">
+  <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+    <div>
+      <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="hourglass" class="w-4 h-4 text-blue-400"></i>Refresh risk: next 12 months</h2>
+      <p class="text-xs text-slate-500">Assets expected to be retired, by location and age (AI estimate from which assets of each age have been retired so far).</p>
+    </div>
+    <span class="text-[11px] text-slate-500" x-show="d && d.computed_at" x-text="d && d.computed_at ? 'scored ' + d.computed_at.slice(0, 10) + ' · model v' + d.model_version : ''"></span>
+  </div>
+  <template x-if="d && d.ready">
+    <div>
+      <div class="flex flex-wrap items-end gap-x-8 gap-y-3 mb-5">
+        <div>
+          <div class="text-3xl font-bold font-heading text-white" x-text="'~' + Math.round(d.expected).toLocaleString('en-IN')"></div>
+          <div class="text-xs text-slate-500" x-text="'of ' + d.assets.toLocaleString('en-IN') + ' scored active assets'"></div>
+        </div>
+        <div>
+          <div class="text-3xl font-bold font-heading text-white" x-text="d.high.toLocaleString('en-IN')"></div>
+          <div class="text-xs text-slate-500">at high risk (50%+)</div>
+        </div>
+        <template x-for="c in d.categories" :key="c.category">
+          <div class="text-xs text-slate-400"><span class="text-slate-200 font-medium" x-text="c.category"></span>
+            <span x-text="' ~' + Math.round(c.expected).toLocaleString('en-IN') + ' of ' + c.n.toLocaleString('en-IN')"></span></div>
+        </template>
+      </div>
+      <div class="table-responsive">
+        <table class="w-full min-w-[640px] text-xs" aria-label="Assets expected to be retired in the next 12 months by location and age">
+          <thead><tr class="text-slate-500">
+            <th class="text-left font-medium py-2 pr-3">Asset Location</th>
+            <template x-for="b in d.bands" :key="b"><th class="font-medium py-2 px-1 text-center" x-text="b"></th></template>
+            <th class="font-medium py-2 pl-3 pr-2 text-right">Total</th>
+          </tr></thead>
+          <tbody>
+            <template x-for="L in d.locations" :key="L.location">
+              <tr>
+                <td class="py-1 pr-3 text-slate-300 whitespace-nowrap" x-text="L.location"></td>
+                <template x-for="(c, i) in L.cells" :key="i">
+                  <td class="p-0.5">
+                    <div class="h-8 rounded-md flex items-center justify-center tabular-nums" :style="shade(c)"
+                         :class="c.n && c.expected / c.n >= 0.3 ? 'text-white font-semibold' : 'text-slate-300'"
+                         :title="L.location + ', ' + d.bands[i] + ': ' + c.n + ' assets, ~' + c.expected.toFixed(1) + ' expected to be retired (average risk ' + (c.n ? Math.round(c.expected / c.n * 100) : 0) + '%)'"
+                         x-text="c.n ? fmt(c.expected) : '·'"></div>
+                  </td>
+                </template>
+                <td class="py-1 pl-3 pr-2 text-right text-slate-200 tabular-nums" x-text="'~' + Math.round(L.expected).toLocaleString('en-IN')"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="flex flex-wrap items-center gap-3 mt-3 text-[11px] text-slate-500">
+        <span>Average 12-month risk:</span>
+        <span>0%</span>
+        <span class="inline-flex h-2 w-40 rounded-full overflow-hidden"><template x-for="s in [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]" :key="s"><span class="flex-1" :style="shade({ n: 1, expected: s })"></span></template></span>
+        <span>60%+</span>
+        <span class="ml-auto">Number in a cell = assets expected to be retired. Hover for details. VMs and client-provided assets are not scored.</span>
+      </div>
+    </div>
+  </template>
+</div>
+<script>
+function aiLifecycleCard() {
+  return {
+    d: null,
+    fmt(x) { return x >= 10 ? Math.round(x).toLocaleString('en-IN') : x.toFixed(1); },
+    // One hue (blue), light to dark with the average risk; empty cells stay blank.
+    shade(c) {
+      if (!c.n) return 'background: rgba(148,163,184,0.04)';
+      const r = Math.min(1, (c.expected / c.n) / 0.6);
+      return 'background: rgba(59,130,246,' + (0.08 + 0.72 * r).toFixed(3) + ')';
+    },
+    async load() {
+      try {
+        const r = await fetch('<%= hams_url('/api/ai/lifecycle/summary') %>', { headers: { Accept: 'application/json' } });
+        if (r.ok) this.d = await r.json();
+      } catch (e) { /* the card stays hidden */ }
+    }
+  };
+}
+</script>

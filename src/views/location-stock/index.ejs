@@ -1,0 +1,179 @@
+<%
+const GRADE_STYLE = { 'Good': 'emerald', 'Acceptable': 'sky', 'Poor': 'amber', 'Not deployable': 'rose' };
+const gradeBadge = g => g ? `<span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-${GRADE_STYLE[g]}-500/10 text-${GRADE_STYLE[g]}-400 border border-${GRADE_STYLE[g]}-500/20">${e(g)}</span>` : '<span class="text-slate-600">—</span>';
+const fmtD = d => d ? new Date(d).toISOString().slice(0, 10) : '—';
+const base = hams_url('/location-stock');
+const link = extra => base + toQuery(filters, extra);
+%>
+<div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+  <div>
+    <h1 class="font-heading text-2xl md:text-3xl font-bold text-white">Location Stock</h1>
+    <p class="text-sm text-slate-500 mt-1 max-w-3xl">Laptops per <b class="text-slate-300">current location</b> (where a device sits: the stock site in the register's Machine Name for in-stock devices, otherwise its base location's site) with quality grades. <b class="text-slate-300">Base location</b> = the register's Asset Location.</p>
+  </div>
+  <a href="<%= hams_url('/inventory-setup/models') %>" class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-300"><i data-lucide="layers-3" class="w-4 h-4"></i>Asset Models</a>
+</div>
+
+<!-- Stock assistant -->
+<div class="bg-hams-card border border-blue-500/20 rounded-3xl p-5 mb-6" x-data="stockAssistant()">
+  <div class="flex items-center gap-2 mb-3">
+    <i data-lucide="sparkles" class="w-4 h-4 text-blue-400"></i>
+    <h2 class="font-heading font-semibold text-white">Stock Assistant</h2>
+    <span class="text-[11px] text-slate-500">answers from this tool's data · nothing leaves the network</span>
+  </div>
+  <form @submit.prevent="send()" class="flex flex-col md:flex-row gap-2">
+    <input type="text" x-model="q" maxlength="300" placeholder="e.g. How many good laptops are in Pune?  ·  History of HAMS-000169"
+           class="flex-1 px-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm">
+    <button class="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium" :disabled="busy">
+      <i data-lucide="send" class="w-4 h-4"></i><span x-text="busy ? 'Thinking…' : 'Ask'">Ask</span>
+    </button>
+  </form>
+  <div class="flex flex-wrap gap-2 mt-3">
+    <% for (const ex of examples) { %>
+    <button type="button" data-q="<%= ex %>" @click="q = $el.dataset.q; send()" class="px-3 py-1 rounded-full bg-white/5 hover:bg-white/10 text-xs text-slate-400"><%= ex %></button>
+    <% } %>
+  </div>
+  <template x-if="res">
+    <div class="mt-4 rounded-2xl bg-hams-bg border border-white/5 p-4 text-sm">
+      <p class="text-slate-200" x-text="res.answer"></p>
+      <ul class="mt-2 space-y-1 text-slate-400 text-xs" x-show="res.lines && res.lines.length">
+        <template x-for="l in (res.lines || [])"><li x-text="l"></li></template>
+      </ul>
+      <a x-show="res.link" :href="res.link && res.link.href" class="inline-flex items-center gap-1 mt-3 text-xs text-blue-400 hover:text-blue-300"><span x-text="res.link && res.link.label"></span><i data-lucide="arrow-right" class="w-3 h-3"></i></a>
+    </div>
+  </template>
+</div>
+
+<!-- Filters -->
+<form method="GET" action="<%= base %>" class="bg-hams-card border border-white/5 rounded-3xl p-5 mb-6">
+  <input type="hidden" name="f" value="1">
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+    <div class="relative">
+      <i data-lucide="search" class="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
+      <input type="text" name="search" value="<%= filters.search %>" placeholder="Tag, serial, name..." class="w-full pl-11 pr-4 py-2.5 rounded-xl bg-hams-bg border border-white/10 text-sm">
+    </div>
+    <%- await include('../components/multiselect', { name: 'site', label: 'Current locations', options: options.sites.map(s => ({ value: s, label: s })), selected: filters.site }) %>
+    <%- await include('../components/multiselect', { name: 'base', label: 'Base locations', options: options.locations.map(l => ({ value: l.id, label: l.name })), selected: filters.base }) %>
+    <%- await include('../components/multiselect', { name: 'quality', label: 'Quality', options: options.grades.map(g => ({ value: g, label: g })), selected: filters.quality }) %>
+    <%- await include('../components/multiselect', { name: 'state', label: 'Statuses', options: options.states.map(s => ({ value: s, label: s })), selected: filters.state }) %>
+    <%- await include('../components/multiselect', { name: 'model', label: 'Models', options: options.models.map(m => ({ value: m.id, label: m.name })), selected: filters.model }) %>
+    <%- await include('../components/multiselect', { name: 'manufacturer', label: 'Manufacturers', options: options.manufacturers.map(m => ({ value: m.id, label: m.name })), selected: filters.manufacturer }) %>
+    <%- await include('../components/multiselect', { name: 'category', label: 'Categories', options: options.categories.map(c => ({ value: c.id, label: c.name })), selected: filters.category }) %>
+  </div>
+  <div class="flex flex-wrap items-center gap-2 mt-4">
+    <button class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium"><i data-lucide="filter" class="w-4 h-4"></i>Apply Filter</button>
+    <a href="<%= base %>" class="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-sm text-slate-300"><i data-lucide="rotate-ccw" class="w-4 h-4"></i>Reset</a>
+    <span class="text-xs text-slate-500 ml-2">Default: in-stock laptops. Tick several values in any filter.</span>
+  </div>
+</form>
+
+<!-- Totals -->
+<div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
+  <div class="bg-hams-card border border-white/5 rounded-2xl p-4"><div class="text-xs text-slate-500">Matching units</div><div class="text-2xl font-bold text-white mt-1"><%= list.paginator.total.toLocaleString('en-IN') %></div></div>
+  <div class="bg-hams-card border border-white/5 rounded-2xl p-4"><div class="text-xs text-slate-500">In stock</div><div class="text-2xl font-bold text-white mt-1"><%= totals.in_stock.toLocaleString('en-IN') %></div></div>
+  <% for (const g of options.grades) { %>
+  <a href="<%= link({ quality: [g] }) %>" class="bg-hams-card border border-white/5 hover:border-<%= GRADE_STYLE[g] %>-500/30 rounded-2xl p-4">
+    <div class="text-xs text-slate-500"><%= g %> <span class="text-slate-600">(in stock)</span></div>
+    <div class="text-2xl font-bold text-<%= GRADE_STYLE[g] %>-400 mt-1"><%= totals.grades[g].toLocaleString('en-IN') %></div>
+  </a>
+  <% } %>
+</div>
+
+<!-- Location cards -->
+<h2 class="font-heading font-semibold text-white mb-3">By current location <span class="text-xs font-normal text-slate-500">(in-stock counts; click to filter)</span></h2>
+<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-8">
+  <% for (const c of cards) { %>
+  <a href="<%= link({ site: [c.site] }) %>" class="block bg-hams-card border <%= c.selected ? 'border-blue-500/40' : 'border-white/5 hover:border-blue-500/20' %> rounded-2xl p-4">
+    <div class="flex items-start justify-between gap-2">
+      <div class="font-medium text-white"><%= c.site %></div>
+      <div class="text-right"><div class="text-xl font-bold text-white"><%= c.in_stock %></div><div class="text-[10px] text-slate-500">in stock<% if (c.allocated) { %> · <%= c.allocated %> allocated<% } %></div></div>
+    </div>
+    <% const tot = Math.max(1, c.in_stock); %>
+    <div class="flex h-1.5 rounded-full overflow-hidden bg-white/5 mt-3">
+      <% for (const g of options.grades) { if (c.grades[g]) { %><div class="bg-<%= GRADE_STYLE[g] %>-400" style="width:<%= (c.grades[g] / tot * 100).toFixed(1) %>%"></div><% } } %>
+    </div>
+    <div class="grid grid-cols-4 gap-1 mt-2 text-center">
+      <% for (const g of options.grades) { %><div><div class="text-sm font-semibold text-<%= GRADE_STYLE[g] %>-400"><%= c.grades[g] %></div><div class="text-[10px] text-slate-500 leading-tight"><%= g === 'Not deployable' ? 'Not depl.' : g %></div></div><% } %>
+    </div>
+    <div class="mt-3 pt-3 border-t border-white/5 text-[11px] text-slate-500">
+      <% if (c.spocs.length) { %>SPOC: <span class="text-slate-300"><%= c.spocs.map(s => s.name).join(', ') %></span><% } else { %>No SPOC set for this location<% } %>
+    </div>
+  </a>
+  <% } %>
+  <% if (!cards.length) { %><div class="text-sm text-slate-500">No matching units.</div><% } %>
+</div>
+
+<!-- Model-wise -->
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden mb-8">
+  <h2 class="font-heading font-semibold text-white px-6 pt-5 pb-3">Model-wise count <span class="text-xs font-normal text-slate-500">(top 50 for the current filter)</span></h2>
+  <div class="table-responsive">
+    <table class="w-full min-w-[800px] text-sm">
+      <thead><tr class="text-left text-xs text-slate-500 uppercase border-y border-white/5">
+        <th class="px-6 py-3">Model</th><th class="px-6 py-3">Manufacturer</th><th class="px-6 py-3 text-right">In stock</th>
+        <% for (const g of options.grades) { %><th class="px-4 py-3 text-right"><%= g %></th><% } %><th class="px-6 py-3 text-right">Allocated</th>
+      </tr></thead>
+      <tbody class="divide-y divide-white/5">
+        <% for (const m of models) { %>
+        <tr class="hover:bg-white/[.02]">
+          <td class="px-6 py-3 text-white"><% if (m.id) { %><a href="<%= link({ model: [m.id] }) %>" class="hover:text-blue-400"><%= m.model %></a><% } else { %><%= m.model %><% } %></td>
+          <td class="px-6 py-3 text-slate-400"><%= m.manufacturer || '—' %></td>
+          <td class="px-6 py-3 text-right text-white font-medium"><%= m.in_stock %></td>
+          <% for (const g of options.grades) { %><td class="px-4 py-3 text-right text-<%= GRADE_STYLE[g] %>-400"><%= m.grades[g] || '' %></td><% } %>
+          <td class="px-6 py-3 text-right text-slate-400"><%= m.allocated %></td>
+        </tr>
+        <% } %>
+        <% if (!models.length) { %><tr><td colspan="8" class="px-6 py-8 text-center text-slate-500">No matching units.</td></tr><% } %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Laptop list -->
+<div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+  <h2 class="font-heading font-semibold text-white px-6 pt-5 pb-3">Units <span class="text-xs font-normal text-slate-500">(best quality first, newest purchase first)</span></h2>
+  <div class="table-responsive">
+    <table class="w-full min-w-[1100px] text-sm">
+      <thead><tr class="text-left text-xs text-slate-500 uppercase border-y border-white/5">
+        <th class="px-6 py-3">Asset</th><th class="px-4 py-3">Model</th><th class="px-4 py-3">Quality</th><th class="px-4 py-3">Current location</th>
+        <th class="px-4 py-3">Base location</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">RAM</th><th class="px-4 py-3">Purchased</th><th class="px-4 py-3">Warranty end</th>
+      </tr></thead>
+      <tbody class="divide-y divide-white/5">
+        <% for (const a of list.items) { %>
+        <tr class="hover:bg-white/[.02] align-top">
+          <td class="px-6 py-3"><a href="<%= hams_url('/assets/' + a.id) %>" class="text-white font-medium hover:text-blue-400"><%= a.asset_tag %></a><div class="text-[11px] text-slate-500">SN <%= a.serial_number || '—' %></div></td>
+          <td class="px-4 py-3 text-slate-300"><%= a.model_name || a.model_number || '—' %><div class="text-[11px] text-slate-500"><%= a.manufacturer || '' %></div></td>
+          <td class="px-4 py-3"><%- gradeBadge(a.quality_grade) %><div class="text-[11px] text-slate-500 mt-1 max-w-[220px]"><%= a.quality_reason || '' %></div></td>
+          <td class="px-4 py-3 text-slate-300"><%= a.current_site || '—' %><% if (a.state === 'In stock' && a.machine_name) { %><div class="text-[11px] text-slate-500 max-w-[200px] truncate" title="<%= a.machine_name %>"><%= a.machine_name %></div><% } %></td>
+          <td class="px-4 py-3 text-slate-400"><%= a.base_location || '—' %></td>
+          <td class="px-4 py-3 text-slate-400"><%= a.state %><% if (a.holder) { %><div class="text-[11px] text-slate-500"><%= a.holder %></div><% } %></td>
+          <td class="px-4 py-3 text-slate-400"><%= a.ram ? a.ram + ' GB' : '—' %></td>
+          <td class="px-4 py-3 text-slate-400"><%= fmtD(a.purchase_date) %></td>
+          <td class="px-4 py-3 text-slate-400"><%= fmtD(a.warranty_expiry) %></td>
+        </tr>
+        <% } %>
+        <% if (!list.items.length) { %><tr><td colspan="9" class="px-6 py-10 text-center text-slate-500">No matching units.</td></tr><% } %>
+      </tbody>
+    </table>
+  </div>
+  <%- await include('../components/pagination', { paginator: list.paginator, baseUrl: link({}) }) %>
+</div>
+
+<script>
+function stockAssistant() {
+  return {
+    q: '', busy: false, res: null,
+    async send() {
+      if (!this.q.trim() || this.busy) return;
+      this.busy = true;
+      try {
+        const r = await fetch('<%= hams_url('/location-stock/ask') %>', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ q: this.q, _csrf: document.querySelector('meta[name=csrf-token]').content })
+        });
+        this.res = r.ok ? await r.json() : { answer: 'The assistant could not answer (' + r.status + ').' };
+      } catch (_) { this.res = { answer: 'The assistant could not be reached.' }; }
+      this.busy = false;
+      this.$nextTick(() => window.lucide && lucide.createIcons());
+    }
+  };
+}
+</script>

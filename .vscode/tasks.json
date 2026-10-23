@@ -1,0 +1,43 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "1. Install dependencies",
+      "type": "shell",
+      "command": "npm install",
+      "problemMatcher": []
+    },
+    {
+      "label": "2. Create database tables",
+      "type": "shell",
+      "command": "node bin/hams-cli.js migrate",
+      "problemMatcher": []
+    },
+    {
+      "label": "3. Seed admin + demo data",
+      "type": "shell",
+      "command": "node bin/hams-cli.js seed",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build CSS",
+      "type": "shell",
+      "command": "npm run build:css",
+      "problemMatcher": []
+    },
+    {
+      "label": "Start app (npm start)",
+      "type": "shell",
+      "command": "npm start",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Run tests",
+      "type": "shell",
+      "command": "npm test",
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}

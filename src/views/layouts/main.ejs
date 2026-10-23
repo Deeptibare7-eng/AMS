@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en" x-data="{ darkMode: document.documentElement.classList.contains('dark') }" :class="{ 'dark': darkMode, 'light': !darkMode }">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title><%= brandName %> | Enterprise IT Operations</title>
+<meta name="theme-color" content="#4f46e5">
+<meta name="csrf-token" content="<%= csrf_token %>">
+<link rel="manifest" href="/manifest.json">
+<script>
+(function() {
+  var theme = localStorage.getItem('hams-theme') || 'dark';
+  document.documentElement.classList.add(theme === 'light' ? 'light' : 'dark');
+})();
+</script>
+<link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/fonts.css">
+<script defer src="/vendor/alpine.min.js"></script>
+<script src="/vendor/apexcharts.min.js"></script>
+<script src="/vendor/lucide.min.js"></script>
+<style>
+:root { --hams-bg: #0a0a0b; --hams-card: #141417; --hams-border: rgba(255,255,255,.05); --hams-text: #e2e8f0; --hams-text-muted: #94a3b8; }
+.light { --hams-bg: #f8fafc; --hams-card: #ffffff; --hams-border: rgba(15,23,42,.08); --hams-text: #0f172a; --hams-text-muted: #64748b; }
+body { background: var(--hams-bg); color: var(--hams-text); font-family: 'Inter', sans-serif; }
+h1,h2,h3,.font-heading { font-family: 'Outfit', sans-serif; }
+.glass { background: var(--hams-card); backdrop-filter: blur(20px); border-bottom: 1px solid var(--hams-border); }
+.table-responsive { overflow-x: auto; border-radius: 1.5rem; scrollbar-width: none; }
+.table-responsive::-webkit-scrollbar { display: none; }
+[x-cloak] { display: none !important; }
+.light .bg-hams-bg { background-color: #f8fafc !important; }
+.light .bg-hams-card { background-color: #ffffff !important; }
+.light .text-white { color: #0f172a !important; }
+.light .text-slate-200 { color: #1e293b !important; }
+.light .text-slate-300 { color: #334155 !important; }
+.light .text-slate-400 { color: #64748b !important; }
+.light .text-slate-500 { color: #64748b !important; }
+.light .border-white\/5 { border-color: rgba(15,23,42,.08) !important; }
+.light .bg-white\/5 { background-color: rgba(15,23,42,.04) !important; }
+.light .divide-white\/5 > * { border-color: rgba(15,23,42,.06) !important; }
+.light input, .light select, .light textarea { color-scheme: light; }
+.dark input, .dark select, .dark textarea { color-scheme: dark; }
+input, select, textarea { background: var(--hams-bg); border: 1px solid var(--hams-border); color: var(--hams-text); }
+</style>
+</head>
+<body class="bg-hams-bg text-slate-200 antialiased overflow-x-hidden"
+      x-data="{ sidebarOpen: window.innerWidth >= 1024, isMobile: window.innerWidth < 1024 }"
+      @resize.window="isMobile = window.innerWidth < 1024; if (!isMobile) sidebarOpen = true">
+
+<!-- Command palette -->
+<div x-data="{ open: false, query: '', ask: false }" @keydown.window.ctrl.k.prevent="open = true; $nextTick(() => $refs.searchInput && $refs.searchInput.focus())"
+     @open-command-palette.window="open = true; $nextTick(() => $refs.searchInput && $refs.searchInput.focus())"
+     @keydown.escape.window="open = false" x-cloak>
+  <div x-show="open" class="fixed inset-0 z-[100] flex items-start justify-center pt-24 px-4">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="open = false"></div>
+    <div class="relative w-full max-w-xl bg-hams-card border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+      <input x-ref="searchInput" x-model="query" type="text" :placeholder="ask ? 'Ask: laptops in Pune with warranty expiring next month' : 'Search assets, users, actions...'"
+             class="w-full px-5 py-4 bg-transparent border-0 border-b border-white/5 outline-none text-sm">
+      <% if (aiOn.has('nl') && await canNav('assets.view', 'assets')) { %><%- await include('../ai/_palette_ask') %><% } %>
+      <% if (aiOn.has('search') && await canNav('assets.view', 'assets')) { %><%- await include('../ai/_palette_search') %><% } %>
+      <div class="p-3 text-xs text-slate-500 uppercase tracking-wider px-5">Navigation &amp; Quick Actions</div>
+      <div class="pb-3 max-h-80 overflow-y-auto">
+        <% const paletteLinks = [
+          ['Add New Asset', '/assets/create', 'plus', 'blue', 'add new asset create hardware'],
+          ['Assets Catalog', '/assets', 'laptop', 'indigo', 'assets catalog hardware list'],
+          ['License Manager', '/inventory/licenses', 'key-round', 'pink', 'license software seats'],
+          ['Stock & Inventory', '/inventory', 'package', 'amber', 'stock inventory consumables accessories'],
+          ['Operations & Maintenance', '/maintenance', 'wrench', 'orange', 'operations maintenance repair'],
+          ['Archive & Soft-Deletes', '/archive', 'archive', 'purple', 'archive deleted restore'],
+          ['Audit & Monitoring', '/settings/monitoring', 'activity', 'emerald', 'audit monitoring health']
+        ]; %>
+        <% for (const [label, href, icon, color, keywords] of paletteLinks) { %>
+        <a href="<%= hams_url(href) %>" x-show="!query || '<%= keywords %>'.includes(query.toLowerCase())"
+           class="flex items-center gap-3 px-5 py-2.5 hover:bg-white/5 text-sm">
+          <span class="w-8 h-8 rounded-lg bg-<%= color %>-500/15 text-<%= color %>-400 flex items-center justify-center"><i data-lucide="<%= icon %>" class="w-4 h-4"></i></span>
+          <%= label %>
+        </a>
+        <% } %>
+      </div>
+      <div class="px-5 py-2 border-t border-white/5 text-[10px] text-slate-500 flex justify-between">
+        <span>Enterprise Search Engine v1.0</span><span>&uarr;&darr; to navigate &middot; ENTER to select</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="flex h-screen overflow-hidden">
+  <!-- Mobile backdrop -->
+  <div x-show="isMobile && sidebarOpen" class="fixed inset-0 bg-black/50 z-30 lg:hidden" @click="sidebarOpen = false" x-cloak></div>
+
+  <!-- Sidebar -->
+  <aside class="fixed lg:static inset-y-0 left-0 z-40 w-72 bg-hams-card border-r border-white/5 flex flex-col transition-transform duration-200"
+         :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:-translate-x-full lg:hidden'" x-show="sidebarOpen || !isMobile" x-cloak>
+    <div class="h-20 md:h-24 flex items-center gap-3 px-6 border-b border-white/5 shrink-0">
+      <% if (brandLogo) { %>
+        <img src="<%= brandLogo %>" alt="logo" class="w-10 h-10 rounded-xl object-contain">
+      <% } else { %>
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg font-heading"><%= brandName.charAt(0) %></div>
+      <% } %>
+      <div class="min-w-0">
+        <div class="font-heading font-semibold text-white truncate"><%= brandName %></div>
+        <div class="text-[11px] text-slate-500 truncate"><%= brandTagline %></div>
+      </div>
+    </div>
+
+    <nav class="flex-1 overflow-y-auto px-4 py-5 space-y-6 text-sm">
+      <%
+      const navClass = (prefix) => {
+        const active = prefix === '/' ? (currentPath === '/' || currentPath === '/dashboard') : currentPath.startsWith(prefix);
+        return active
+          ? 'flex items-center gap-3 px-3 py-2 rounded-xl bg-blue-600/10 text-blue-500 font-medium border-l-2 border-blue-500'
+          : 'flex items-center gap-3 px-3 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/5';
+      };
+      const canDashboard = await canNav('dashboard.view');
+      %>
+      <% if (!canDashboard) { %>
+      <div>
+        <div class="px-3 mb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Employee Portal</div>
+        <a href="<%= hams_url('/portal/dashboard') %>" class="<%= navClass('/portal/dashboard') %>"><i data-lucide="layout-dashboard" class="w-4 h-4"></i>Overview</a>
+        <a href="<%= hams_url('/portal/my-assets') %>" class="<%= navClass('/portal/my-assets') %>"><i data-lucide="laptop" class="w-4 h-4"></i>My Assets</a>
+        <a href="<%= hams_url('/portal/requests') %>" class="<%= navClass('/portal/requests') %>"><i data-lucide="message-square" class="w-4 h-4"></i>My Requests</a>
+      </div>
+      <% } else { %>
+      <div>
+        <div class="px-3 mb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Core Systems</div>
+        <a href="<%= hams_url('/') %>" class="<%= navClass('/') %>"><i data-lucide="layout-dashboard" class="w-4 h-4"></i>Dashboard</a>
+        <% if ((typeof isSpoc !== 'undefined' && isSpoc) || await canNav('assets.view', 'assets')) { %>
+        <a href="<%= hams_url('/location-workspace') %>" class="<%= navClass('/location-workspace') %>"><i data-lucide="map-pinned" class="w-4 h-4"></i>Location Workspace</a>
+        <% } %>
+        <% if (await canNav('ai.view', 'ai')) { %>
+        <a href="<%= hams_url('/ai/approvals') %>" class="<%= navClass('/ai/approvals') %>"><i data-lucide="sparkles" class="w-4 h-4"></i>AI Approvals</a>
+        <% if (typeof aiOn !== 'undefined' && aiOn.has('data_quality') && await canNav('assets.view', 'assets')) { %>
+        <a href="<%= hams_url('/ai/data-health') %>" class="<%= navClass('/ai/data-health') %>"><i data-lucide="shield-check" class="w-4 h-4"></i>Data Health</a>
+        <% } %>
+        <% if (typeof aiOn !== 'undefined' && aiOn.has('cost') && await canNav('assets.view', 'assets')) { %>
+        <a href="<%= hams_url('/ai/planning') %>" class="<%= navClass('/ai/planning') %>"><i data-lucide="calendar-range" class="w-4 h-4"></i>Refresh Planning</a>
+        <% } %>
+        <% } %>
+      </div>
+      <% const canPeopleView = await canNav('personnel.view', 'personnel');
+         const canPeopleManage = await canNav('personnel.manage', 'personnel');
+         const canSettingsManage = await canNav('settings.manage', 'settings'); %>
+      <% if (canPeopleView || canPeopleManage || canSettingsManage) { %>
+      <div>
+        <div class="px-3 mb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Administration</div>
+        <% if (canPeopleView) { %>
+        <a href="<%= hams_url('/users') %>" class="<%= navClass('/users') %>"><i data-lucide="users" class="w-4 h-4"></i>Enterprise Directory</a>
+        <a href="<%= hams_url('/users/ldap') %>" class="<%= navClass('/users/ldap') %>"><i data-lucide="network" class="w-4 h-4"></i>LDAP Directory &amp; Sync</a>
+        <% } %>
+        <% if (canPeopleManage) { %>
+        <a href="<%= hams_url('/settings/roles') %>" class="<%= navClass('/settings/roles') %>"><i data-lucide="shield-check" class="w-4 h-4"></i>Roles &amp; Permissions</a>
+        <a href="<%= hams_url('/location-spocs') %>" class="<%= navClass('/location-spocs') %>"><i data-lucide="user-cog" class="w-4 h-4"></i>Location SPOCs</a>
+        <% } %>
+        <% if (canSettingsManage) { %>
+        <a href="<%= hams_url('/settings/identity') %>" class="<%= navClass('/settings/identity') %>"><i data-lucide="fingerprint" class="w-4 h-4"></i>Identity &amp; SSO</a>
+        <a href="<%= hams_url('/settings/security') %>" class="<%= navClass('/settings/security') %>"><i data-lucide="shield" class="w-4 h-4"></i>Security Center</a>
+        <a href="<%= hams_url('/agents') %>" class="<%= navClass('/agents') %>"><i data-lucide="radio" class="w-4 h-4"></i>Endpoint Agents</a>
+        <a href="<%= hams_url('/settings/branding') %>" class="<%= navClass('/settings') %>"><i data-lucide="settings" class="w-4 h-4"></i>All Settings</a>
+        <% } %>
+      </div>
+      <% } %>
+      <% const canAssets = await canNav('assets.view', 'assets');
+         const canMaint = await canNav('maintenance.view', 'maintenance');
+         const canInv = await canNav('inventory.view', 'inventory');
+         const canLic = await canNav('licenses.view', 'licenses'); %>
+      <% if (canAssets || canInv || canMaint) { %>
+      <div>
+        <div class="px-3 mb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Asset Management</div>
+        <% if (canAssets) { %>
+        <a href="<%= hams_url('/new-joinees') %>" class="<%= navClass('/new-joinees') %>"><i data-lucide="user-check" class="w-4 h-4"></i>New Joinees</a>
+        <% if (await canNav('settings.manage', 'settings')) { %><a href="<%= hams_url('/import-data') %>" class="<%= navClass('/import-data') %>"><i data-lucide="file-up" class="w-4 h-4"></i>Import Data</a><% } %>
+        <a href="<%= hams_url('/assets') %>" class="<%= navClass('/assets') %>"><i data-lucide="laptop" class="w-4 h-4"></i>Hardware</a>
+        <a href="<%= hams_url('/procurement') %>" class="<%= navClass('/procurement') %>"><i data-lucide="receipt" class="w-4 h-4"></i>Procurement</a>
+        <a href="<%= hams_url('/assets/scan') %>" class="<%= navClass('/assets/scan') %>"><i data-lucide="qr-code" class="w-4 h-4"></i>Mobile Scanner</a>
+        <a href="<%= hams_url('/portal/scan') %>" class="<%= navClass('/portal/scan') %>"><i data-lucide="scan-barcode" class="w-4 h-4"></i>Barcode Scanner</a>
+        <% } %>
+        <% if (canMaint) { %><a href="<%= hams_url('/maintenance') %>" class="<%= navClass('/maintenance') %>"><i data-lucide="wrench" class="w-4 h-4"></i>Maintenance</a><% } %>
+        <% if (canInv) { %>
+        <a href="<%= hams_url('/inventory/accessories') %>" class="<%= navClass('/inventory/accessories') %>"><i data-lucide="mouse" class="w-4 h-4"></i>Accessories</a>
+        <a href="<%= hams_url('/inventory/components') %>" class="<%= navClass('/inventory/components') %>"><i data-lucide="cpu" class="w-4 h-4"></i>Components</a>
+        <% } %>
+      </div>
+      <% } %>
+      <% if (canLic) { %>
+      <div>
+        <div class="px-3 mb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">License Management</div>
+        <a href="<%= hams_url('/inventory/licenses') %>" class="<%= navClass('/inventory/licenses') %>"><i data-lucide="key-round" class="w-4 h-4"></i>Licenses</a>
+        <a href="<%= hams_url('/software') %>" class="<%= navClass('/software') %>"><i data-lucide="app-window" class="w-4 h-4"></i>Software</a>
+        <a href="<%= hams_url('/license-allocation') %>" class="<%= navClass('/license-allocation') %>"><i data-lucide="gauge" class="w-4 h-4"></i>License Allocation &amp; Utilization</a>
+        <% if (await canNav('licenses.manage_setup', 'licenses')) { %>
+        <a href="<%= hams_url('/licenses/setup') %>" class="<%= navClass('/licenses/setup') %>"><i data-lucide="sliders-horizontal" class="w-4 h-4"></i>License Setup</a>
+        <% } %>
+      </div>
+      <% } %>
+      <% if (canInv) { %>
+      <div>
+        <div class="px-3 mb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Inventory Module</div>
+        <a href="<%= hams_url('/inventory/consumables') %>" class="<%= navClass('/inventory/consumables') %>"><i data-lucide="package-minus" class="w-4 h-4"></i>Consumables</a>
+        <a href="<%= hams_url('/inventory-setup') %>" class="<%= navClass('/inventory-setup') %>"><i data-lucide="boxes" class="w-4 h-4"></i>Inventory Setup</a>
+        <a href="<%= hams_url('/stock-movements') %>" class="<%= navClass('/stock-movements') %>"><i data-lucide="arrow-left-right" class="w-4 h-4"></i>Stock Movements</a>
+      </div>
+      <% } %>
+      <div>
+        <div class="px-3 mb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Analytics</div>
+        <% if ((await canNav('reports.view', 'reports')) || (await canNav('reports.create', 'reports')) || (await canNav('reports.manage', 'reports'))) { %>
+        <a href="<%= hams_url('/reports') %>" class="<%= navClass('/reports') %>"><i data-lucide="file-bar-chart" class="w-4 h-4"></i>Reports</a>
+        <% } %>
+        <% if (await canNav('reports.create')) { %>
+        <a href="<%= hams_url('/import') %>" class="<%= navClass('/import') %>"><i data-lucide="file-up" class="w-4 h-4"></i>Import Center</a>
+        <% } %>
+        <% if (await canNav('requests.approve', 'requests')) { %>
+        <a href="<%= hams_url('/requests') %>" class="<%= navClass('/requests') %>"><i data-lucide="clipboard-list" class="w-4 h-4"></i>Requests</a>
+        <% } %>
+      </div>
+      <div>
+        <div class="px-3 mb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">My Workspace</div>
+        <a href="<%= hams_url('/portal/my-assets') %>" class="<%= navClass('/portal/my-assets') %>"><i data-lucide="laptop" class="w-4 h-4"></i>My Assets</a>
+        <a href="<%= hams_url('/portal/requests') %>" class="<%= navClass('/portal/requests') %>"><i data-lucide="message-square" class="w-4 h-4"></i>My Requests</a>
+      </div>
+      <% } %>
+    </nav>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
+    <header class="h-20 md:h-24 glass flex items-center gap-4 px-4 md:px-8 shrink-0 z-20">
+      <button @click="sidebarOpen = !sidebarOpen" class="p-2 rounded-xl hover:bg-white/5 text-slate-400"><i data-lucide="menu" class="w-5 h-5"></i></button>
+      <button @click="$dispatch('open-command-palette')"
+              class="flex-1 max-w-md flex items-center gap-3 px-4 py-2.5 rounded-2xl bg-white/5 border border-white/5 text-slate-500 text-sm hover:border-white/10">
+        <i data-lucide="search" class="w-4 h-4"></i>
+        <span class="hidden md:inline">Search everything&hellip;</span><span class="md:hidden">Search&hellip;</span>
+        <kbd class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-white/10 hidden md:inline">Ctrl + K</kbd>
+      </button>
+      <div class="ml-auto flex items-center gap-2">
+        <% if (currentUser) { %>
+        <button id="hams-export-btn" type="button" title="Download this view as Excel"
+                data-export-url="<%= typeof exportUrl !== 'undefined' && exportUrl ? exportUrl : '' %>"
+                class="relative p-2.5 rounded-xl hover:bg-emerald-500/10 text-emerald-400 disabled:opacity-50 disabled:cursor-wait">
+          <i data-lucide="file-spreadsheet" class="w-5 h-5"></i>
+          <span data-export-spin class="hidden absolute inset-0 flex items-center justify-center"><span class="w-5 h-5 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin"></span></span>
+        </button>
+        <% } %>
+        <% if (currentUser && (await canNav('settings.manage'))) { %>
+        <a href="<%= hams_url('/settings/branding') %>" class="p-2.5 rounded-xl hover:bg-white/5 <%= currentPath.startsWith('/settings') ? 'text-blue-500' : 'text-slate-400' %>"><i data-lucide="settings" class="w-5 h-5"></i></a>
+        <% } %>
+        <button @click="darkMode = !darkMode; localStorage.setItem('hams-theme', darkMode ? 'dark' : 'light')" class="p-2.5 rounded-xl hover:bg-white/5 text-slate-400">
+          <i data-lucide="moon" class="w-5 h-5" x-show="darkMode"></i>
+          <i data-lucide="sun" class="w-5 h-5" x-show="!darkMode" x-cloak></i>
+        </button>
+        <% if (currentUser && canDashboard) { %>
+        <div x-data="{ createNewOpen: false }" class="relative" @click.outside="createNewOpen = false">
+          <button @click="createNewOpen = !createNewOpen" class="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium">
+            <i data-lucide="plus" class="w-4 h-4"></i><span class="hidden md:inline">Create New</span>
+          </button>
+          <div x-show="createNewOpen" x-cloak x-transition class="absolute right-0 mt-2 w-56 bg-hams-card border border-white/10 rounded-2xl shadow-xl py-2 z-[150]">
+            <% if (await canNav('assets.create', 'assets')) { %><a href="<%= hams_url('/assets/create') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="laptop" class="w-4 h-4"></i>Hardware</a><% } %>
+            <% if (await canNav('licenses.create', 'licenses')) { %><a href="<%= hams_url('/inventory/licenses') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="key-round" class="w-4 h-4"></i>Licenses</a><% } %>
+            <% if (await canNav('inventory.create', 'inventory')) { %>
+            <a href="<%= hams_url('/inventory/accessories') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="mouse" class="w-4 h-4"></i>Accessories</a>
+            <a href="<%= hams_url('/inventory/consumables') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="package-minus" class="w-4 h-4"></i>Consumables</a>
+            <a href="<%= hams_url('/inventory/components') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="cpu" class="w-4 h-4"></i>Components</a>
+            <% } %>
+            <% if (await canNav('personnel.create', 'personnel')) { %>
+            <div class="my-1 border-t border-white/5"></div>
+            <a href="<%= hams_url('/users') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="users" class="w-4 h-4"></i>Users</a>
+            <% } %>
+          </div>
+        </div>
+        <% } %>
+        <% if (currentUser) { %>
+        <div x-data="{ profileOpen: false }" class="relative" @click.outside="profileOpen = false">
+          <button @click="profileOpen = !profileOpen" class="flex items-center gap-3 pl-2 pr-3 py-1.5 rounded-2xl hover:bg-white/5">
+            <img src="<%= currentUser.avatar_url ? '/' + currentUser.avatar_url : avatarUrl(currentUser.name) %>"
+                 class="w-9 h-9 rounded-xl object-cover" alt="avatar">
+            <span class="hidden md:block text-sm font-medium text-white max-w-[120px] truncate"><%= currentUser.name %></span>
+            <i data-lucide="chevron-down" class="w-4 h-4 text-slate-500 transition-transform" :class="profileOpen && 'rotate-180'"></i>
+          </button>
+          <div x-show="profileOpen" x-cloak x-transition class="absolute right-0 mt-2 w-60 bg-hams-card border border-white/10 rounded-2xl shadow-xl py-2 z-[150]">
+            <a href="<%= hams_url('/portal/my-assets') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="laptop" class="w-4 h-4"></i>My Assets</a>
+            <a href="<%= hams_url('/portal/requests') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="message-square" class="w-4 h-4"></i>My Requests</a>
+            <% if (await canNav('requests.approve', 'requests')) { %>
+            <a href="<%= hams_url('/requests') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="clipboard-list" class="w-4 h-4"></i>Requests</a>
+            <% } %>
+            <div class="my-1 border-t border-white/5"></div>
+            <a href="<%= hams_url('/profile') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="user" class="w-4 h-4"></i>Edit Profile</a>
+            <a href="<%= hams_url('/profile') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="key" class="w-4 h-4"></i>Change Password</a>
+            <button @click="darkMode = !darkMode; localStorage.setItem('hams-theme', darkMode ? 'dark' : 'light')" class="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5">
+              <i data-lucide="moon" class="w-4 h-4"></i>Dark Mode <span class="ml-auto text-xs text-slate-500" x-text="darkMode ? 'ON' : 'OFF'"></span>
+            </button>
+            <% if (isSuperAdmin) { %>
+            <div class="my-1 border-t border-white/5"></div>
+            <a href="<%= hams_url('/settings/api-tokens') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="key-round" class="w-4 h-4"></i>Manage API keys</a>
+            <a href="<%= hams_url('/logs') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"><i data-lucide="scroll-text" class="w-4 h-4"></i>Log Viewer</a>
+            <% } %>
+            <div class="my-1 border-t border-white/5"></div>
+            <a href="<%= hams_url('/logout') %>" class="flex items-center gap-3 px-4 py-2 text-sm text-rose-400 hover:bg-rose-500/10"><i data-lucide="log-out" class="w-4 h-4"></i>Logout</a>
+          </div>
+        </div>
+        <% } %>
+      </div>
+    </header>
+
+    <div id="hams-content" class="flex-1 overflow-y-auto px-4 md:px-8 py-6 md:py-8">
+      <% for (const [key, color] of [['success', 'emerald'], ['error', 'rose']]) { if (flash[key]) { %>
+      <div class="mb-6 px-5 py-4 rounded-2xl border bg-<%= color %>-500/10 border-<%= color %>-500/20 text-<%= color %>-300 text-sm font-medium"><%= flash[key] %></div>
+      <% } } %>
+      <% if (typeof dashboardBack !== 'undefined' && dashboardBack) { %>
+      <div class="mb-6"><a href="<%= hams_url('/') %>" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-medium"><i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>Back to Dashboard</a></div>
+      <% } %>
+      <%- content %>
+    </div>
+  </main>
+</div>
+
+<!-- Global confirm modal -->
+<div id="hams-confirm-modal" class="fixed inset-0 z-[200] hidden items-center justify-center px-4">
+  <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+  <div class="relative bg-hams-card border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+    <div class="flex items-center gap-3 mb-3">
+      <span class="w-10 h-10 rounded-xl bg-rose-500/15 text-rose-400 flex items-center justify-center"><i data-lucide="triangle-alert" class="w-5 h-5"></i></span>
+      <h3 class="font-heading font-semibold text-white">Confirm Action</h3>
+    </div>
+    <p id="hams-confirm-message" class="text-sm text-slate-400 mb-5"></p>
+    <div class="flex justify-end gap-2">
+      <button data-confirm-cancel class="px-4 py-2 rounded-xl bg-white/5 text-sm text-slate-300 hover:bg-white/10">Cancel</button>
+      <button data-confirm-ok class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-sm text-white font-medium">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<% if (currentUser) { %>
+<div id="hams-export-toast" class="hidden fixed bottom-6 right-6 z-[200] max-w-sm px-4 py-3 rounded-2xl bg-hams-card border border-white/10 shadow-xl text-sm text-slate-200"></div>
+<script>
+// Header Excel icon. Pages with a full export (all filtered records) set exportUrl;
+// otherwise the tables shown on the page are sent back as a workbook.
+(function () {
+  var btn = document.getElementById('hams-export-btn');
+  if (!btn) return;
+  var CSRF = <%- safeJson(csrf_token) %>, VIEW_URL = <%- safeJson(hams_url('/export/view')) %>;
+  var toast = document.getElementById('hams-export-toast'), toastTimer;
+  function say(msg) { toast.textContent = msg; toast.classList.remove('hidden'); clearTimeout(toastTimer); toastTimer = setTimeout(function () { toast.classList.add('hidden'); }, 4000); }
+  function clean(t) { return String(t || '').replace(/\s+/g, ' ').trim(); }
+  function visible(el) { return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length); }
+  function pageTitle() { var h = document.querySelector('#hams-content h1'); return clean(h ? h.textContent : document.title) || 'Export'; }
+  function tableName(table, i) {
+    var card = table.closest('.rounded-3xl, .rounded-2xl, section');
+    var h = card && card.querySelector('h2, h3');
+    return clean(h ? h.textContent : '') || (i ? pageTitle() + ' ' + (i + 1) : pageTitle());
+  }
+  function collect() {
+    var out = [];
+    document.querySelectorAll('#hams-content table').forEach(function (table, i) {
+      if (!visible(table)) return;
+      var headRow = table.querySelector('thead tr') || table.querySelector('tr');
+      var heads = headRow ? Array.prototype.map.call(headRow.children, function (c) { return clean(c.innerText); }) : [];
+      var rows = [];
+      table.querySelectorAll('tbody tr').forEach(function (tr) {
+        if (tr === headRow || !visible(tr)) return;
+        var cells = Array.prototype.map.call(tr.children, function (c) {
+          var input = c.querySelector('input:not([type=checkbox]):not([type=hidden]), select');
+          return clean(input && !clean(c.innerText) ? (input.value || '') : c.innerText);
+        });
+        if (cells.length === 1 && heads.length > 1) return;   // "No records" placeholder row
+        if (cells.some(function (v) { return v; })) rows.push(cells);
+      });
+      // Drop checkbox / action-button columns (no header text, or "Actions", with no text in any row).
+      var keep = heads.map(function (h, ci) {
+        var empty = rows.every(function (r) { return !r[ci]; });
+        return !(empty && (!h || /^actions?$/i.test(h)));
+      });
+      out.push({ name: tableName(table, i), headers: heads.filter(function (_, ci) { return keep[ci]; }),
+        rows: rows.map(function (r) { return r.filter(function (_, ci) { return keep[ci] !== false; }); }) });
+    });
+    return out.filter(function (t) { return t.rows.length; });
+  }
+  function fileName(res, fallback) {
+    var m = /filename="?([^"]+)"?/.exec(res.headers.get('Content-Disposition') || '');
+    return m ? m[1] : fallback + '.xlsx';
+  }
+  async function download(res, fallback) {
+    if (!res.ok) { var j = {}; try { j = await res.json(); } catch (e) {} throw new Error(j.message || 'Export failed (' + res.status + ').'); }
+    var blob = await res.blob(), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = fileName(res, fallback);
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+  }
+  btn.addEventListener('click', async function () {
+    var url = btn.getAttribute('data-export-url'), title = pageTitle();
+    var payload = null;
+    if (!url) {
+      var tables = collect();
+      if (!tables.length) { say('There is no table on this page to export.'); return; }
+      payload = { _csrf: CSRF, title: title + ' ' + new Date().toISOString().slice(0, 10), tables: tables };
+    }
+    btn.disabled = true; btn.querySelector('[data-export-spin]').classList.remove('hidden'); btn.querySelector('svg, i').style.visibility = 'hidden';
+    say(url ? 'Preparing Excel file with all matching records…' : 'Preparing Excel file…');
+    try {
+      var res = url ? await fetch(url, { credentials: 'same-origin' })
+        : await fetch(VIEW_URL, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      await download(res, title);
+      say(url ? 'Excel file downloaded (all matching records).' : 'Excel file downloaded (tables on this page).');
+    } catch (e) { say(e.message || 'Export failed.'); }
+    btn.disabled = false; btn.querySelector('[data-export-spin]').classList.add('hidden'); btn.querySelector('svg, i').style.visibility = '';
+  });
+})();
+</script>
+<% } %>
+
+<script>
+// Type-to-search picker used by components/picker.ejs.
+function hamsPicker(url, required) {
+  return {
+    q: '', id: '', results: [], open: false, loading: false, active: 0, seq: 0,
+    init() { if (required) this.$watch('id', v => this.$refs.text.setCustomValidity(v ? '' : 'Pick an entry from the list')); if (required) this.$refs.text.setCustomValidity('Pick an entry from the list'); },
+    async search() {
+      this.id = ''; this.open = true; this.loading = true; const mine = ++this.seq;
+      try {
+        const r = await fetch(url + '?q=' + encodeURIComponent(this.q), { headers: { Accept: 'application/json' } });
+        const j = await r.json();
+        if (mine === this.seq) { this.results = j.results || []; this.active = 0; }
+      } catch (e) { if (mine === this.seq) this.results = []; }
+      if (mine === this.seq) this.loading = false;
+    },
+    move(d) { if (this.results.length) this.active = (this.active + d + this.results.length) % this.results.length; },
+    choose(r) { this.id = r.id; this.q = r.label; this.open = false; }
+  };
+}
+
+// Draw icons once on DOMContentLoaded. On load, only convert icons added since
+// (e.g. by Alpine) — calling createIcons() again re-drew every icon on the page.
+document.addEventListener('DOMContentLoaded', function() { if (window.lucide) lucide.createIcons(); });
+window.addEventListener('load', function() {
+  if (!window.lucide) return;
+  var pending = document.querySelectorAll('i[data-lucide]');
+  if (!pending.length) return;
+  pending.forEach(function(el) { el.setAttribute('data-lucide-pending', el.getAttribute('data-lucide')); });
+  lucide.createIcons({ nameAttr: 'data-lucide-pending' });
+});
+
+// Global confirm modal wiring (data-confirm on forms, data-confirm-click on buttons)
+(function() {
+  var modal = document.getElementById('hams-confirm-modal');
+  var msgEl = document.getElementById('hams-confirm-message');
+  var pending = null;
+  function show(message, onOk) {
+    msgEl.textContent = message;
+    pending = onOk;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+  }
+  function hide() { modal.classList.add('hidden'); modal.classList.remove('flex'); pending = null; }
+  modal.querySelector('[data-confirm-cancel]').addEventListener('click', hide);
+  modal.querySelector('[data-confirm-ok]').addEventListener('click', function() { var fn = pending; hide(); if (fn) fn(); });
+  document.addEventListener('submit', function(e) {
+    var form = e.target.closest('form[data-confirm]');
+    if (form && !form.dataset.confirmed) {
+      e.preventDefault();
+      show(form.dataset.confirm, function() { form.dataset.confirmed = '1'; form.submit(); });
+    }
+  }, true);
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-confirm-click]');
+    if (btn && !btn.dataset.confirmed) {
+      e.preventDefault();
+      show(btn.dataset.confirmClick, function() {
+        btn.dataset.confirmed = '1';
+        if (btn.formAction && btn.form) { btn.form.action = btn.formAction; btn.form.submit(); }
+        else btn.click();
+      });
+    }
+  }, true);
+})();
+
+// Barcode scan helper (BarcodeDetector with prompt fallback)
+document.addEventListener('click', async function(e) {
+  var btn = e.target.closest('[data-barcode-scan]');
+  if (!btn) return;
+  var fieldName = btn.dataset.barcodeScan;
+  var input = document.querySelector('[name="' + fieldName + '"], [data-barcode-target="' + fieldName + '"]');
+  if (!input) return;
+  var code = window.prompt('Scan or enter barcode value:');
+  if (code) { input.value = code; input.dispatchEvent(new Event('input')); }
+});
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(function() {});
+  });
+}
+</script>
+</body>
+</html>

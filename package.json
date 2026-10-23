@@ -1,0 +1,43 @@
+{
+  "name": "it-hams",
+  "version": "1.0.0",
+  "description": "IT-HAMS - Enterprise Hardware Asset Management Solution (Node.js + PostgreSQL port of HAMS)",
+  "license": "MIT",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "npm run build:css --silent && node src/server.js",
+    "dev": "npm run build:css --silent && node --watch src/server.js",
+    "migrate": "node bin/hams-cli.js migrate",
+    "seed": "node bin/hams-cli.js seed",
+    "cli": "node bin/hams-cli.js",
+    "heartbeat": "node bin/heartbeat-agent.js",
+    "heartbeat:once": "node bin/heartbeat-agent.js --once",
+    "test": "node --test --test-concurrency=1 \"tests/**/*.test.js\"",
+    "test:db": "node tools/setup-test-db.js",
+    "build:css": "tailwindcss -c tailwind.config.js -i src/styles/tailwind.css -o public/css/app.css --minify"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/outfit": "^5.3.0",
+    "alpinejs": "^3.17.4",
+    "apexcharts": "^7.8.0",
+    "bcryptjs": "^2.4.3",
+    "connect-pg-simple": "^9.0.1",
+    "dotenv": "^16.4.5",
+    "ejs": "^3.1.10",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "lucide": "^1.51.0",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^10.0.14",
+    "pg": "^8.12.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.19"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

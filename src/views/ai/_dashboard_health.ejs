@@ -1,0 +1,59 @@
+<%# Data health card on the dashboard (included only while "Data health" is on). Loads after the page. %>
+<div x-data="aiHealthCard()" x-init="load()" x-show="d && d.ready" x-cloak class="bg-hams-card border border-white/5 rounded-3xl p-6 mb-6">
+  <template x-if="d && d.ready">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="sparkles" class="w-4 h-4 text-blue-400"></i>Data health</h2>
+          <span class="text-[11px] text-slate-500" x-text="'checked ' + d.checked_at.slice(0, 10)"></span>
+        </div>
+        <div class="flex items-end gap-3 mb-3">
+          <span class="text-4xl font-bold font-heading" :class="d.avg >= 90 ? 'text-emerald-400' : (d.avg >= 70 ? 'text-amber-400' : 'text-rose-400')" x-text="d.avg"></span>
+          <span class="text-sm text-slate-500 mb-1">/ 100 average over <span x-text="d.assets.toLocaleString('en-IN')"></span> active assets</span>
+        </div>
+        <div x-show="d.trend !== null" class="text-xs mb-3" :class="d.trend >= 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="(d.trend >= 0 ? '▲ ' : '▼ ') + Math.abs(d.trend) + ' since the previous scan'"></div>
+        <div class="flex h-2 rounded-full overflow-hidden bg-white/5 mb-2" :title="d.good + ' good, ' + d.fair + ' fair, ' + d.poor + ' poor'">
+          <div class="bg-emerald-400" :style="'width:' + (d.good / d.assets * 100) + '%'"></div>
+          <div class="bg-amber-400" :style="'width:' + (d.fair / d.assets * 100) + '%'"></div>
+          <div class="bg-rose-400" :style="'width:' + (d.poor / d.assets * 100) + '%'"></div>
+        </div>
+        <div class="flex gap-4 text-[11px] text-slate-500">
+          <span><span class="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1"></span>Good <span x-text="d.good"></span></span>
+          <span><span class="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1"></span>Fair <span x-text="d.fair"></span></span>
+          <span><span class="inline-block w-2 h-2 rounded-full bg-rose-400 mr-1"></span>Poor <span x-text="d.poor"></span></span>
+        </div>
+      </div>
+      <div class="lg:col-span-2">
+        <div class="text-xs text-slate-500 mb-2">Most common issues</div>
+        <div class="space-y-1.5">
+          <template x-for="i in d.top" :key="i.code">
+            <a :href="'<%= hams_url('/ai/data-health') %>?issue=' + i.code" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/5 text-sm">
+              <span class="w-2 h-2 rounded-full" :class="i.severity === 'high' ? 'bg-rose-400' : (i.severity === 'medium' ? 'bg-amber-400' : 'bg-slate-400')"></span>
+              <span class="flex-1 text-slate-300" x-text="i.label"></span>
+              <span class="text-white font-medium" x-text="i.n.toLocaleString('en-IN')"></span>
+              <i data-lucide="chevron-right" class="w-4 h-4 text-slate-600"></i>
+            </a>
+          </template>
+        </div>
+        <div class="flex flex-wrap gap-4 mt-3 text-xs">
+          <a href="<%= hams_url('/ai/data-health') %>" class="text-blue-400 hover:text-blue-300">Open Data Health →</a>
+          <a x-show="d.pending" href="<%= hams_url('/ai/approvals') %>" class="text-blue-400 hover:text-blue-300" x-text="d.pending + ' fix(es) waiting in AI Approvals →'"></a>
+        </div>
+      </div>
+    </div>
+  </template>
+</div>
+<script>
+function aiHealthCard() {
+  return {
+    d: null,
+    async load() {
+      try {
+        const r = await fetch('<%= hams_url('/api/ai/data-health/summary') %>', { headers: { Accept: 'application/json' } });
+        if (r.ok) this.d = await r.json();
+        this.$nextTick(() => window.lucide && window.lucide.createIcons());
+      } catch (e) { /* optional card */ }
+    }
+  };
+}
+</script>

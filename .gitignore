@@ -1,0 +1,42 @@
+node_modules/
+.env
+storage/logs/*.log
+storage/sessions/*
+storage/temp/*
+storage/backups/*
+storage/reports/*
+public/uploads/*
+!public/uploads/.gitkeep
+
+# never commit secrets, env backups/temp files, run logs or DB dumps
+.env.*
+!.env.example
+storage/*.log
+*.sql
+!database/*.sql
+*.sql.gz
+*.dump
+storage/backups/**
+# local safety copies made during data clean-ups (Intune removal, placeholder emails)
+storage/*.csv
+storage/intune-backup/
+
+# company data — share the database dump privately, never through GitHub
+*.xlsx
+*.xls
+!sample-data/**/*.xlsx
+
+# old nested copy, large media, Office lock files, local tool settings
+/IT-AMS-v2/
+*.zip
+~$*
+.claude/
+
+
+# public copy: never the database dump, pages rendered from live data, submission documents or real names
+database-dump/
+05_Output_Artifacts/rendered-pages/
+*.pptx
+*.docx
+00_SUBMISSION_INDEX.txt
+04_Sample_Data_Pack/Software_Asset_Synthetic_1000_enhanced.csv

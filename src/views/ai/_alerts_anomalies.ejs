@@ -1,0 +1,55 @@
+<%# Unusual assets on Alerts (included only while "Unusual assets" is on and the user can see Hardware).
+    Loads after the page. "Real issue" / "Expected" only records a label; no asset is changed. %>
+<div id="ai-anomalies" x-data="aiAnomalies()" x-init="load()" class="bg-hams-card border border-amber-500/20 rounded-3xl p-6 mb-6">
+  <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+    <div>
+      <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="radar" class="w-4 h-4 text-amber-400"></i>Unusual assets <span class="text-xs font-normal text-slate-500">AI</span></h2>
+      <p class="text-xs text-slate-500">Active assets that look unusual next to the other assets of their model, their holder's devices or their age. Mark each finding so the AI learns how often it is right; nothing is changed.</p>
+    </div>
+    <div class="text-[11px] text-slate-500 text-right" x-show="d">
+      <div x-text="d ? d.total.toLocaleString('en-IN') + ' to review' + (d.computed_at ? ' · checked ' + d.computed_at.slice(0, 10) : '') : ''"></div>
+      <div x-show="d && (d.reviewed.issues + d.reviewed.expected) > 0"
+           x-text="d ? 'Reviewed so far: ' + d.reviewed.issues + ' real issue(s), ' + d.reviewed.expected + ' expected' + (d.precision !== null ? ' (' + Math.round(d.precision * 100) + '% real)' : '') : ''"></div>
+    </div>
+  </div>
+  <p x-show="!d && !failed" class="text-sm text-slate-500">Loading…</p>
+  <p x-show="failed" x-cloak class="text-sm text-slate-500">Not available right now.</p>
+  <p x-show="d && !d.groups.length" x-cloak class="text-sm text-slate-500">Nothing unusual to review<span x-show="d && !d.computed_at"> (the first check runs tonight, or Run now on Settings &gt; AI)</span>.</p>
+  <div class="space-y-3">
+    <template x-for="g in (d ? d.groups : [])" :key="g.asset_id">
+      <div class="p-4 rounded-2xl bg-white/[.03] border border-white/5">
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2">
+          <a :href="'<%= hams_url('/assets/') %>' + g.asset_id" class="text-sm font-medium text-white hover:text-blue-400" x-text="g.name"></a>
+          <span class="text-[11px] font-mono text-slate-500" x-text="g.asset_tag"></span>
+          <span x-show="g.assets.length > 1" class="text-[11px] text-slate-400" x-text="'and ' + (g.assets.length - 1) + ' similar: ' + g.assets.slice(1, 6).map(a => a.tag).join(', ') + (g.assets.length > 6 ? ', …' : '')"></span>
+          <span class="ml-auto px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-amber-500/10 text-amber-400" :title="'Isolation Forest score ' + g.score.toFixed(2) + ' (0.5 = ordinary, 1 = clearly unusual)'" x-text="'score ' + g.score.toFixed(2)"></span>
+        </div>
+        <div class="text-[11px] text-slate-500 mb-2" x-text="[g.category, g.model, g.holder ? 'held by ' + g.holder : 'not assigned', g.location].filter(Boolean).join(' · ')"></div>
+        <ul class="space-y-0.5 text-sm text-slate-300 list-disc pl-5 mb-3">
+          <template x-for="w in g.why" :key="w"><li x-text="w"></li></template>
+        </ul>
+        <form x-show="d.can_review" method="POST" action="<%= hams_url('/ai/anomalies/review') %>" class="flex flex-wrap items-center gap-2">
+          <%- csrf_field %>
+          <template x-for="a in g.assets" :key="a.id"><input type="hidden" name="asset_ids[]" :value="a.id"></template>
+          <button name="verdict" value="issue" class="px-3 py-1.5 rounded-xl text-xs font-medium bg-rose-500/10 text-rose-300 hover:bg-rose-500/20" x-text="g.assets.length > 1 ? 'Real issue (all ' + g.assets.length + ')' : 'Real issue'"></button>
+          <button name="verdict" value="expected" class="px-3 py-1.5 rounded-xl text-xs font-medium bg-white/5 text-slate-300 hover:bg-white/10" x-text="g.assets.length > 1 ? 'Expected (all ' + g.assets.length + ')' : 'Expected'"></button>
+        </form>
+      </div>
+    </template>
+  </div>
+  <p x-show="d && d.more" x-cloak class="text-xs text-slate-500 mt-3" x-text="d ? '+ ' + d.more + ' more group(s); they appear here as these are reviewed.' : ''"></p>
+</div>
+<script>
+function aiAnomalies() {
+  return {
+    d: null, failed: false,
+    async load() {
+      try {
+        const r = await fetch('<%= hams_url('/api/ai/anomalies') %>', { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error(r.status);
+        this.d = await r.json();
+      } catch (e) { this.failed = true; }
+    }
+  };
+}
+</script>
