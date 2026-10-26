@@ -469,3 +469,123 @@ Files: `src/ai/models/holtWinters.js`, `src/ai/models/knapsack.js`, `src/ai/cost
 `src/routes/ai.js`, `src/views/ai/_dashboard_cost.ejs`, `src/views/ai/planning.ejs`, `src/views/ai/_alerts_compliance.ejs`,
 `src/views/home.ejs`, `src/views/operations/alerts.ejs`, `src/views/layouts/main.ejs`, `bin/hams-cli.js`,
 `public/css/app.css`, `tests/ai-cost.test.js`, `tests/smoke-pages.test.js`, `docs/ai/**`.
+
+## In-house AI layer, M6: questions in plain language (2026-10-23)
+
+One new capability, off until switched on under Settings > AI. It only reads.
+
+- **Ask in Ctrl+K and on Hardware:** "laptops in Pune with warranty expiring next month", "how many
+  desktops are in stock at Mindspace", "who has HAMS-…", "which laptops are due for refresh".
+  - The answer gives a count, examples, the filters it understood (removable chips), how sure it is and why.
+  - "Not what I meant" keeps the question for the seed set (Settings > AI lists them).
+  - Requests to change something are refused with a link to where a person does it.
+- **No LLM and no SQL from the question:**
+  - rule-based entities from the register's own vocabularies (categories, makers, models, sites and site
+    codes, CTIDs, dates, RAM, OS, statuses, data issues), with typo tolerance;
+  - an intent classifier trained from scratch on 265 seed questions (Naive Bayes vs logistic regression
+    by cross-validation);
+  - the result is whitelisted Hardware filters run by the existing, parameterised `assetService`, in the
+    user's location scope.
+- **AssistantAgent:** the first agent, with a goal, a whitelist of read-only tools (existing services),
+  thresholds and escalation (`src/ai/agents/`).
+- **New Hardware filters** (also usable in links): place, holder, warranty and purchase dates, RAM, OS,
+  refresh risk high, unusual, data issue, sort.
+- **Measured** (93 hand-written questions):
+  - intent 100%;
+  - entities F1 97.6% (precision 95.4%, recall 100%);
+  - SQL-safety fuzz: 553 questions, 0 values outside the whitelist;
+  - 0.1 ms per question;
+  - cross-validated 85.1% on the seed set.
+  - Three rules were tuned after seeing test-set errors, so the cross-validated figure is the conservative
+    one.
+- **Database:** no new table. It writes the intent model and the missed questions to the AI tables only.
+- **CLI:** `node bin/hams-cli.js ai:eval nl` (read-only).
+- **Hooks in existing code:**
+  - optional filters in `assetService` (ignored unless given);
+  - `?ask=` and the banner in the Hardware route and view;
+  - the Ask mode include in `layouts/main.ejs`.
+- **Tests:** 90 → 104.
+
+Files: `src/ai/nl/**`, `src/ai/agents/**`, `src/ai/eval/nlEval.js`, `src/ai/eval/run.js`, `src/ai/flags.js`,
+`src/services/assetService.js`, `src/routes/assets.js`, `src/routes/ai.js`, `src/views/assets/index.ejs`,
+`src/views/ai/_ask_banner.ejs`, `src/views/ai/_palette_ask.ejs`, `src/views/ai/_palette_search.ejs`,
+`src/views/layouts/main.ejs`, `src/views/settings/ai.ejs`, `bin/hams-cli.js`, `public/css/app.css`,
+`tests/ai-nl.test.js`, `tests/smoke-pages.test.js`, `docs/ai/**`. Real CTIDs, asset tags, FAMS numbers and
+serials used as examples in the AI code, tests and docs were replaced with made-up ones (checked against the
+register).
+
+## In-house AI layer, M7: agents and the orchestrator (2026-10-23)
+
+One new capability, "Agents working together", off until switched on. It needs `ai_m7.sql`
+(`node bin/hams-cli.js migrate`: two new `ai_*` tables and one column on an AI table, reversible).
+
+- **Eight agents, one per module:**
+  - Intake, DataQuality, Maintenance, Anomaly, LifecycleCost, Compliance, Assistant and Report.
+  - Each has a goal, a whitelist of read-only tools over the existing services, thresholds and escalation.
+  - None can change data.
+- **The orchestrator:**
+  - Routes events (asset added or changed, repair logged, licence changed, import finished) and requests
+    (Review now, questions, the daily briefing) to task graphs.
+  - Runs independent agents side by side, with timeouts and retries; scans go through the existing job runner.
+  - Shares a blackboard between the agents.
+  - Weighs their claims by confidence and track record. Agreement → a recommendation; disagreement or doubt →
+    a recommendation marked "Closer look" with the options.
+  - Stores a full trace of every run (AI Runs).
+- **AI Approvals, full inbox:**
+  - filters (agent, kind, closer look, confidence, location, text, order) with counts;
+  - bulk accept and reject (each item checked on its own);
+  - picking another option when agents disagree (recorded as "edited"; it teaches the agents' weights);
+  - a link from each recommendation to the run that produced it.
+- **Repair or replace:** after repeated or expensive repairs, a sign-off recommendation that changes nothing.
+- **Daily briefing** (05:00): a few plain sentences on data health, refresh risk, cost, unusual assets,
+  licences and what waits for a decision.
+- **Measured on the real register** (read-only, 422 assets):
+  - median 198 ms per asset review;
+  - on the 22 assets data health says are mis-filed: 6 agreed by both agents (recommended), 13 disputed by the
+    intake model (sent for a closer look).
+  - Maintenance and compliance have no data yet (0 records).
+- **CLI:** `node bin/hams-cli.js ai:eval agents` (read-only).
+- **Hooks in existing code:** one include on the asset page, a sidebar link, and the import scan stepping
+  aside while the agents run it.
+- **Tests:** 104 → 123.
+
+Files: `database/ai_m7.sql`, `database/ai_m7.down.sql`, `src/ai/agents/**`, `src/ai/orchestrator/**`,
+`src/ai/eval/agentsEval.js`, `src/ai/eval/run.js`, `src/ai/flags.js`, `src/ai/index.js`,
+`src/ai/governance/approvals.js`, `src/routes/ai.js`, `src/views/ai/approvals.ejs`, `src/views/ai/runs.ejs`,
+`src/views/ai/run.ejs`, `src/views/ai/_asset_agents.ejs`, `src/views/settings/ai.ejs`, `src/views/assets/show.ejs`,
+`src/views/layouts/main.ejs`, `bin/hams-cli.js`, `public/css/app.css`, `tests/ai-agents.test.js`,
+`tests/ai-migration.test.js`, `tests/smoke-pages.test.js`, `docs/ai/**`.
+
+## In-house AI layer, M8: governance, the feedback loop, drift (2026-10-23)
+
+The last milestone: the AI learns from people's decisions, watches its own inputs, and admins can retrain,
+roll back and pin models from Settings > AI. Drift checks need `ai_m8.sql` (one new `ai_*` table,
+reversible). Everything else works without it.
+
+- **Models** (Settings > AI):
+  - each model's purpose, versions and test numbers;
+  - Retrain now;
+  - for the intake and refresh-risk models: roll back or activate a version, which pins it so scheduled
+    retraining can't replace it; Unpin;
+  - the models rebuilt on every run say why they have no rollback.
+- **Drift** (daily 05:30, Settings > AI > Drift report):
+  - PSI per feature and the KS test, comparing the register with the data each version learnt from;
+  - significant drift is audited and starts a retrain (unless pinned).
+  - On the real register, purchases since 2024 differ strongly from older ones (laptops 63% → 98%, Windows 11
+    18% → 85%, cost +51%), so retraining will matter as the fleet renews.
+- **The feedback loop:**
+  - rejected recommendations are not proposed again unless they change;
+  - 20+ category decisions retrain the intake model;
+  - missed questions can be taught on Settings > AI, and the classifier learns them;
+  - a Feedback section shows acceptance by kind and model version, unusual-asset precision, real-click search
+    quality and the latest overrides.
+- **Audit:** model activations, rollbacks, pins, kept candidates, retrain requests, drift alerts and taught
+  questions are all in the audit log.
+- **CLI:** `node bin/hams-cli.js ai:eval drift` (read-only).
+- **Tests:** 123 → 136.
+
+Files: `database/ai_m8.sql`, `database/ai_m8.down.sql`, `src/ai/governance/{drift,driftSpecs,driftCheck,feedback,models}.js`,
+`src/ai/governance/registry.js`, `src/ai/governance/approvals.js`, `src/ai/agents/assistant.js`, `src/ai/intake/training.js`,
+`src/ai/lifecycle/run.js`, `src/ai/eval/driftEval.js`, `src/ai/eval/run.js`, `src/ai/index.js`, `src/routes/ai.js`,
+`src/views/settings/ai.ejs`, `src/views/settings/ai-drift.ejs`, `bin/hams-cli.js`, `public/css/app.css`,
+`tests/ai-governance.test.js`, `tests/ai-migration.test.js`, `tests/smoke-pages.test.js`, `docs/ai/**`.

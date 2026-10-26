@@ -41,21 +41,72 @@ const PAGES = [
   [/\bdashboard|home\b/i, '/', 'Dashboard']
 ];
 
+// The classifier learns from the seed set plus the questions people taught it on Settings > AI
+// (M8: a question it got wrong, with the kind it should have been). A version is identified by the
+// seed version and the taught questions; it is retrained when either changes.
+const INTENTS = [...new Set(seed.rows().map(r => r.intent))];
 let modelCache = null;
+let taughtCache = { at: 0, value: null };
+const keyOf = p => p.training_key || `${p.seed_version}:0`;
+
+async function taught() {
+  if (taughtCache.value && Date.now() - taughtCache.at < 60000) return taughtCache.value;
+  let rows = [];
+  try {
+    const list = await db.query(`SELECT predicted->>'q' AS q, actual->>'intent' AS intent FROM ai_feedback WHERE capability = 'nl' AND label = 'taught' ORDER BY id`);
+    if (list.length) {
+      const v = await vocab.load();
+      rows = list.filter(r => INTENTS.includes(r.intent)).map(r => ({ text: entities.extract(r.q, v).masked, intent: r.intent, q: r.q }));
+    }
+  } catch (_) { /* no AI tables (bare test): the seed set alone */ }
+  const crypto = require('crypto');
+  const key = `${seed.SEED_VERSION}:${rows.length}${rows.length ? ':' + crypto.createHash('sha1').update(rows.map(r => `${r.intent}|${r.text}`).join('\n')).digest('hex').slice(0, 10) : ''}`;
+  taughtCache = { at: Date.now(), value: { rows, key } };
+  return taughtCache.value;
+}
+
 async function model() {
-  if (modelCache && modelCache.params.seed_version === seed.SEED_VERSION) return modelCache;
+  const { rows: extra, key } = await taught();
+  if (modelCache && keyOf(modelCache.params) === key) return modelCache;
   try {
     const active = await IntentClassifier.load();
-    if (active && active.params.seed_version === seed.SEED_VERSION) return (modelCache = active);
+    if (active && keyOf(active.params) === key) return (modelCache = active);
   } catch (_) { /* registry not reachable: train in memory */ }
-  const m = new IntentClassifier().train();
+  const m = new IntentClassifier().train([...seed.rows(), ...extra.map(r => ({ text: r.text, intent: r.intent }))]);
+  m.params.training_key = key;
+  m.params.taught = extra.length;
   try {
-    const version = await registry.save(m, { metrics: m.metrics, training: { seed_version: seed.SEED_VERSION, utterances: m.metrics.utterances } });
+    const version = await registry.save(m, { metrics: m.metrics, training: { seed_version: seed.SEED_VERSION, utterances: m.metrics.utterances, taught: extra.length } });
     await registry.activate(IntentClassifier.modelName, version);
   } catch (_) { /* the AI tables may be missing in a bare test; the model still works */ }
   return (modelCache = m);
 }
-function resetModel() { modelCache = null; }
+function resetModel() { modelCache = null; taughtCache = { at: 0, value: null }; }
+
+// "This question was about X": stored as a training label, audited; the next question retrains.
+async function teach(question, intent, user) {
+  const q = String(question || '').trim().slice(0, 200);
+  if (!q) throw Object.assign(new Error('Which question?'), { status: 422 });
+  if (!INTENTS.includes(intent)) throw Object.assign(new Error('Pick one of the kinds of question.'), { status: 422 });
+  const before = understand(q, await vocab.load(), await model());
+  await db.run(
+    `INSERT INTO ai_feedback (capability, model_name, model_version, target_type, label, predicted, actual, user_id)
+     VALUES ('nl', 'nl_intent', (SELECT version FROM ai_models WHERE name = 'nl_intent' AND status = 'active'), 'question', 'taught', $1, $2, $3)`,
+    [JSON.stringify({ q, intent: before.intent, confidence: before.confidence }), JSON.stringify({ intent }), user ? user.id : null]);
+  await require('../../services/auditService').log(user ? user.id : null, 'AI_NL_TAUGHT', `Question "${q}" taught as "${intent}" (it was read as "${before.intent}").`);
+  resetModel();
+  return { was: before.intent, now: intent };
+}
+
+// Retrain on request: only when something new was taught (or the seed set changed).
+async function retrain() {
+  const cur = modelCache || await IntentClassifier.load().catch(() => null);
+  resetModel();
+  const { key } = await taught();
+  if (cur && keyOf(cur.params) === key) return { summary: `Nothing new to learn: no question taught since v${cur.version || '?'}.` };
+  const m = await model();
+  return { version: m.version, summary: `Question classifier v${m.version}: ${m.metrics.utterances} training questions (${m.params.taught} taught), cross-validated macro-F1 ${(m.metrics.cv_macroF1 * 100).toFixed(1)}%.` };
+}
 
 // Words of the question nothing understood and the seed set never uses: a free-text search term
 // ("lenovo thinkpad laptops" -> "thinkpad"). At most three words; filler ("still", "please") never.
@@ -123,9 +174,10 @@ function understand(q, v, clf, today = new Date()) {
   return { intent, confidence, ent, guess, text };
 }
 
-async function ask(question, user, { today = new Date() } = {}) {
+// agent: pass one in (the orchestrator does) to read its tool calls afterwards for the run's trace.
+async function ask(question, user, { today = new Date(), agent = null } = {}) {
   const q = String(question || '').trim().slice(0, 200);
-  const agent = make(user);
+  agent = agent || make(user);
   const on = await flags.enabledSet();
   const v = await vocab.load();
   const clf = await model();
@@ -273,7 +325,7 @@ async function redirectFor(question, user) {
   const q = String(question || '').trim().slice(0, 200);
   if (!q) return '/assets';
   if (!(await flags.isOn('nl'))) return '/assets?search=' + encodeURIComponent(q);
-  const a = await ask(q, user);
+  const a = await require('../orchestrator').ask(q, user); // a traced run while the agents are on
   if (a.fallback || a.low_confidence) await recordMiss(q, a, user).catch(() => {});
   if (a.link && a.link.startsWith('/assets?') && !a.link.includes('asked=')) return a.link + '&asked=' + encodeURIComponent(q);
   return a.link || '/assets?search=' + encodeURIComponent(q) + '&asked=' + encodeURIComponent(q);
@@ -288,8 +340,12 @@ async function recordMiss(question, answer, user, label = 'ignored') {
     [label, JSON.stringify({ q: String(question).slice(0, 200), intent: answer ? answer.intent : null, confidence: answer ? answer.confidence : null }), user ? user.id : null]);
 }
 
+// Missed questions, each with what it was taught as (if it was).
 async function misses(limit = 20) {
-  return db.query(`SELECT predicted, label, created_at FROM ai_feedback WHERE capability = 'nl' ORDER BY id DESC LIMIT $1`, [limit]);
+  return db.query(
+    `SELECT f.predicted, f.label, f.created_at,
+            (SELECT t.actual->>'intent' FROM ai_feedback t WHERE t.capability = 'nl' AND t.label = 'taught' AND t.predicted->>'q' = f.predicted->>'q' ORDER BY t.id DESC LIMIT 1) AS taught
+       FROM ai_feedback f WHERE f.capability = 'nl' AND f.label <> 'taught' ORDER BY f.id DESC LIMIT $1`, [limit]);
 }
 
-module.exports = { ask, understand, gate, redirectFor, chipsFromQuery, recordMiss, misses, model, resetModel, make, THRESHOLDS, NL_KEYS, describe, residual, paramsToFilters };
+module.exports = { ask, understand, gate, redirectFor, chipsFromQuery, recordMiss, misses, model, resetModel, teach, retrain, INTENTS, make, THRESHOLDS, NL_KEYS, describe, residual, paramsToFilters };

@@ -12,6 +12,8 @@ const DB = 'it_hams_migration_test';
 const root = path.join(__dirname, '..');
 const AI_TABLES = ['ai_feature_snapshots', 'ai_asset_events', 'ai_models', 'ai_recommendations', 'ai_feedback'];
 const M2_TABLES = ['ai_dq_runs', 'ai_dq_issues', 'ai_predictions'];
+const M7_TABLES = ['ai_runs', 'ai_run_steps'];
+const M8_TABLES = ['ai_drift'];
 
 function cli(...args) {
   const r = spawnSync(process.execPath, [path.join(root, 'bin', 'hams-cli.js'), ...args], {
@@ -57,8 +59,24 @@ test('ai.sql migrates, rolls back cleanly and migrates again', { timeout: 180000
   };
 
   const full = await state();
-  assert.deepEqual(full.tables, [...AI_TABLES, ...M2_TABLES].sort());
-  // Newest first: ai_m2.sql, then ai.sql.
+  assert.deepEqual(full.tables, [...AI_TABLES, ...M2_TABLES, ...M7_TABLES, ...M8_TABLES].sort());
+  const recColumns = async () => (await c.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'ai_recommendations' ORDER BY 1`)).rows.map(r => r.column_name);
+  assert.ok((await recColumns()).includes('needs_review'));
+  // Newest first: ai_m8.sql, ai_m7.sql, ai_m2.sql, then ai.sql.
+  await c.query(`INSERT INTO settings (group_key, setting_key, setting_value) VALUES ('ai', 'pin_intake_classifier', '3')`);
+  assert.match(cli('migrate:rollback', 'ai_m8.sql'), /Rolled back ai_m8.sql/);
+  const m7 = await state();
+  assert.deepEqual(m7.tables, [...AI_TABLES, ...M2_TABLES, ...M7_TABLES].sort(), 'ai_m8 rollback removes only its own table');
+  assert.equal(Number((await c.query(`SELECT COUNT(*) AS n FROM settings WHERE group_key = 'ai' AND setting_key LIKE 'pin\_%'`)).rows[0].n), 0, 'and the pins');
+  assert.equal(m7.otherTables, full.otherTables);
+  await c.query(`INSERT INTO settings (group_key, setting_key, setting_value) VALUES ('ai', 'agents', '1')`);
+  assert.match(cli('migrate:rollback', 'ai_m7.sql'), /Rolled back ai_m7\.sql/);
+  const m2 = await state();
+  assert.deepEqual(m2.tables, [...AI_TABLES, ...M2_TABLES].sort(), 'ai_m7 rollback removes only its own tables');
+  assert.ok(!(await recColumns()).includes('needs_review'), 'and its column');
+  assert.equal(Number((await c.query(`SELECT COUNT(*) AS n FROM settings WHERE group_key = 'ai' AND setting_key = 'agents'`)).rows[0].n), 0, 'and its switch');
+  assert.equal(m2.otherTables, full.otherTables);
+  assert.equal(m2.assets, full.assets);
   assert.match(cli('migrate:rollback', 'ai_m2.sql'), /Rolled back ai_m2\.sql/);
   const up = await state();
   assert.deepEqual(up.tables, [...AI_TABLES].sort(), 'ai_m2 rollback removes only its own tables');
@@ -82,6 +100,6 @@ test('ai.sql migrates, rolls back cleanly and migrates again', { timeout: 180000
 
   cli('migrate');
   const again = await state();
-  assert.deepEqual(again.tables, full.tables, 'both migrations apply again');
+  assert.deepEqual(again.tables, full.tables, 'all four migrations apply again');
   assert.equal(again.migration, 1);
 });

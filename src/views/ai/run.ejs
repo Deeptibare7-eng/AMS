@@ -1,0 +1,135 @@
+<% const SC = { done: 'emerald', partial: 'amber', failed: 'rose', running: 'sky', timeout: 'rose', skipped: 'slate' }; %>
+<% const ctx = run.context || {}; const dagInfo = Array.isArray(run.dag) ? { nodes: run.dag, omitted: [] } : (run.dag || { nodes: [], omitted: [] }); %>
+<% const stepOf = id => run.steps.find(s => s.node === id); const ms = v => v === null || v === undefined ? '' : v < 1000 ? v + ' ms' : (v / 1000).toFixed(1) + ' s'; %>
+<% const pct = p => (p >= 0.995 ? '>99%' : Math.round(p * 100) + '%'); %>
+<div class="space-y-6">
+  <div>
+    <a href="<%= hams_url('/ai/runs') %>" class="text-xs text-slate-500 hover:text-slate-300">← AI Runs</a>
+    <h1 class="font-heading text-2xl md:text-3xl font-bold text-white mt-1 mb-1">Run #<%= run.id %>: <%= FLOW_LABELS[run.flow] || run.flow %></h1>
+    <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+      <span class="px-2 py-0.5 rounded-md bg-<%= SC[run.status] || 'slate' %>-500/10 text-<%= SC[run.status] || 'slate' %>-400"><%= run.status %></span>
+      <span>Started by <%= run.trigger.replace(/\./g, ' ') %><%= run.user_name ? ' (' + run.user_name + ')' : '' %> · <%= formatDateTime(run.started_at) %> · took <%= ms(run.duration_ms) || '…' %></span>
+      <% if (run.target_type === 'asset' && run.target_id) { %><a href="<%= hams_url('/assets/' + run.target_id) %>" class="text-blue-400 hover:text-blue-300 font-mono"><%= run.asset_tag || 'asset #' + run.target_id %> →</a><% } %>
+    </div>
+    <p class="text-sm text-slate-300 mt-2"><%= run.summary %></p>
+    <% if (run.error) { %><p class="text-xs text-rose-400 mt-1"><%= run.error %></p><% } %>
+  </div>
+
+  <%# The task graph: one column per level; nodes in the same column ran side by side. %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <h2 class="font-heading font-semibold text-white mb-1">Task graph</h2>
+    <p class="text-xs text-slate-500 mb-4">Steps in the same column ran side by side; each column waited for the steps it depends on.</p>
+    <% const maxLevel = Math.max(0, ...dagInfo.nodes.map(n => n.level || 0)); %>
+    <div class="flex flex-wrap md:flex-nowrap gap-3 items-start overflow-x-auto">
+      <% for (let lv = 0; lv <= maxLevel; lv++) { %>
+      <div class="flex flex-col gap-2 min-w-[12rem]">
+        <% for (const n of dagInfo.nodes.filter(x => (x.level || 0) === lv)) { const s = stepOf(n.id) || {}; %>
+        <div class="rounded-2xl border border-white/10 px-4 py-3">
+          <div class="flex items-center justify-between gap-2"><span class="text-white text-sm font-medium"><%= n.id.replace(/_/g, ' ') %></span><span class="px-1.5 py-0.5 rounded-md text-[10px] bg-<%= SC[s.status] || 'slate' %>-500/10 text-<%= SC[s.status] || 'slate' %>-400"><%= s.status || 'not run' %></span></div>
+          <div class="text-[11px] text-slate-500"><%= n.agent %><%= s.duration_ms !== undefined && s.duration_ms !== null ? ' · ' + ms(s.duration_ms) : '' %><%= s.attempts > 1 ? ' · ' + s.attempts + ' tries' : '' %></div>
+          <% if (n.deps && n.deps.length) { %><div class="text-[10px] text-slate-600">after <%= n.deps.join(', ').replace(/_/g, ' ') %><%= n.always ? ' (runs even if they fail)' : '' %></div><% } %>
+        </div>
+        <% } %>
+      </div>
+      <% if (lv < maxLevel) { %><div class="hidden md:flex items-center text-slate-600 self-center">→</div><% } %>
+      <% } %>
+    </div>
+    <% if (dagInfo.omitted && dagInfo.omitted.length) { %>
+    <p class="text-xs text-slate-500 mt-4">Left out: <%= dagInfo.omitted.map(o => o.agent + ' (' + o.reason + ')').join(' · ') %></p>
+    <% } %>
+  </div>
+
+  <% if ((ctx.decisions || []).length) { %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <h2 class="font-heading font-semibold text-white mb-1">How the agents' views were settled</h2>
+    <p class="text-xs text-slate-500 mb-4">Each claim counts by the agent's confidence and its track record in AI Approvals; agreeing agents make each other surer. Close calls and disagreements go to a person.</p>
+    <% const OC = { propose: ['emerald', 'Recommended'], review: ['amber', 'For a closer look'], keep: ['slate', 'Confirmed as recorded'], drop: ['slate', 'Not sure enough: not proposed'] }; %>
+    <div class="space-y-4">
+      <% for (const d of ctx.decisions) { const oc = OC[d.outcome] || ['slate', d.outcome]; %>
+      <div class="rounded-2xl border border-white/10 p-4">
+        <div class="flex flex-wrap items-center gap-2 mb-2 text-sm">
+          <span class="text-white font-medium"><%= d.field.replace(/_id$/, '').replace(/_/g, ' ') %></span>
+          <span class="px-2 py-0.5 rounded-md text-xs bg-<%= oc[0] %>-500/10 text-<%= oc[0] %>-400"><%= oc[1] %></span>
+          <span class="text-xs text-slate-500">recorded: <%= d.current_label || '—' %> · decided: <%= d.label %> (<%= pct(d.confidence) %>)</span>
+          <% if (d.proposal && d.proposal.id) { %><a href="<%= hams_url('/ai/approvals?q=' + encodeURIComponent(run.asset_tag || '')) %>" class="text-xs text-blue-400 hover:text-blue-300">AI Approvals #<%= d.proposal.id %> →</a><% } else if (d.proposal && d.proposal.skipped) { %><span class="text-xs text-slate-500"><%= d.proposal.skipped %></span><% } %>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead><tr class="text-left text-slate-500"><th class="py-1 pr-4">Option</th><th class="py-1 pr-4">Backed by (confidence × weight)</th><th class="py-1 pr-4 text-right">Share</th><th class="py-1 text-right">Score</th></tr></thead>
+            <tbody>
+              <% for (const o of d.options) { %>
+              <tr class="border-t border-white/5"><td class="py-1.5 pr-4 text-slate-200"><%= o.label %><%= o.value === d.current ? ' (recorded)' : '' %></td>
+                <td class="py-1.5 pr-4 text-slate-400"><%= (o.claims || []).map(c => `${c.agent} ${pct(c.confidence)} × ${c.weight.toFixed(2)}`).join(', ') %></td>
+                <td class="py-1.5 pr-4 text-right text-slate-400"><%= pct(o.share) %></td><td class="py-1.5 text-right text-slate-200"><%= pct(o.score) %></td></tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+        <ul class="mt-2 text-xs text-slate-400 list-disc pl-5 space-y-0.5"><% for (const w of d.why || []) { %><li><%= w %></li><% } %></ul>
+      </div>
+      <% } %>
+    </div>
+  </div>
+  <% } %>
+
+  <% if ((ctx.findings || []).length) { %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <h2 class="font-heading font-semibold text-white mb-3">Findings for a person</h2>
+    <ul class="space-y-1.5 text-sm">
+      <% for (const f of ctx.findings) { %>
+      <li class="flex gap-2"><span class="px-1.5 py-0.5 rounded-md text-[10px] shrink-0 <%= f.severity === 'high' ? 'bg-rose-500/10 text-rose-400' : 'bg-amber-500/10 text-amber-400' %>"><%= f.agent %></span>
+        <span class="text-slate-300"><%= f.text %></span><% if (f.target_type === 'asset' && f.target_id) { %><a href="<%= hams_url('/assets/' + f.target_id) %>" class="text-xs text-blue-400 hover:text-blue-300">→</a><% } %></li>
+      <% } %>
+    </ul>
+  </div>
+  <% } %>
+
+  <% if (ctx.entries && ctx.entries.briefing) { %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <h2 class="font-heading font-semibold text-white mb-3">Briefing</h2>
+    <ul class="space-y-1.5 text-sm text-slate-300"><% for (const l of (ctx.entries.briefing.value.lines || [])) { %><li>• <%= l.text %><% if (l.link) { %> <a href="<%= hams_url(l.link) %>" class="text-blue-400 hover:text-blue-300 text-xs">→</a><% } %></li><% } %></ul>
+  </div>
+  <% } %>
+
+  <div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+    <div class="px-6 pt-6 pb-3"><h2 class="font-heading font-semibold text-white">Steps</h2><p class="text-xs text-slate-500">In the order they finished, with the tools each agent called and what it returned.</p></div>
+    <div class="divide-y divide-white/5">
+      <% for (const s of run.steps) { %>
+      <details class="px-6 py-3">
+        <summary class="cursor-pointer flex flex-wrap items-center gap-2 text-sm">
+          <span class="text-white"><%= s.node.replace(/_/g, ' ') %></span><span class="text-xs text-slate-500"><%= s.agent %></span>
+          <span class="px-1.5 py-0.5 rounded-md text-[10px] bg-<%= SC[s.status] || 'slate' %>-500/10 text-<%= SC[s.status] || 'slate' %>-400"><%= s.status %></span>
+          <span class="text-xs text-slate-500"><%= ms(s.duration_ms) %><%= s.attempts > 1 ? ' · ' + s.attempts + ' tries' : '' %><%= (s.tool_calls || []).length ? ' · tools: ' + s.tool_calls.map(t => t.tool + ' (' + t.ms + ' ms)').join(', ') : '' %></span>
+        </summary>
+        <% if (s.error) { %><p class="text-xs text-rose-400 mt-2"><%= s.error %></p><% } %>
+        <% if (s.output) { %><pre class="mt-2 text-[11px] text-slate-400 bg-black/20 rounded-xl p-3 overflow-x-auto whitespace-pre-wrap"><%= JSON.stringify(s.output, null, 2) %></pre><% } %>
+      </details>
+      <% } %>
+    </div>
+  </div>
+
+  <% if (run.recommendations.length) { %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <h2 class="font-heading font-semibold text-white mb-3">Sent to AI Approvals</h2>
+    <ul class="space-y-1 text-sm">
+      <% for (const r of run.recommendations) { %><li class="text-slate-300">#<%= r.id %> <%= r.title %> · <span class="text-slate-500"><%= r.status %><%= r.needs_review ? ' · closer look' : '' %></span></li><% } %>
+    </ul>
+  </div>
+  <% } %>
+
+  <% if ((ctx.claims || []).length) { %>
+  <details class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <summary class="cursor-pointer font-heading font-semibold text-white">Blackboard: every claim the agents made (<%= ctx.claims.length %>)</summary>
+    <div class="overflow-x-auto mt-3">
+      <table class="w-full text-xs">
+        <thead><tr class="text-left text-slate-500"><th class="py-1 pr-4">Agent</th><th class="py-1 pr-4">Field</th><th class="py-1 pr-4">Says</th><th class="py-1 pr-4 text-right">Sure</th><th class="py-1">Why</th></tr></thead>
+        <tbody>
+          <% for (const c of ctx.claims) { %>
+          <tr class="border-t border-white/5"><td class="py-1.5 pr-4 text-slate-300"><%= c.agent %></td><td class="py-1.5 pr-4 text-slate-400"><%= c.field %></td><td class="py-1.5 pr-4 text-slate-200"><%= c.label %><%= c.value === c.current ? ' (as recorded)' : '' %></td><td class="py-1.5 pr-4 text-right text-slate-300"><%= pct(c.confidence) %></td><td class="py-1.5 text-slate-400"><%= (c.why || []).join('; ') %></td></tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+  </details>
+  <% } %>
+</div>

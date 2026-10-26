@@ -88,5 +88,9 @@ test('existing pages render with AI off and on', async t => {
     const to = String(asked.location).replace(/^https?:\/\/[^/]+/, '');
     assert.ok(mode === 'all' ? /asked=laptops/.test(to) : to.startsWith('/assets?search=laptops'), `${to} with AI ${mode}`);
     assert.equal((await browser.get(to)).status, 200, `${to} with AI ${mode}`);
+    assert.equal((await browser.get('/ai/runs')).status, mode === 'all' ? 200 : mode === 'on' ? 404 : 403, `/ai/runs with AI ${mode}`);
+    assert.equal((await browser.get(`/assets/${asset.id}`)).text.includes('aiAssetAgents('), mode === 'all', 'agents card only with Agents working together on');
+    if (aiOn) assert.equal((await browser.get('/ai/approvals?review=1&min=0.8&sort=newest&q=x')).status, 200, `filtered inbox with AI ${mode}`);
+    assert.equal((await browser.get('/settings/ai/drift')).status, 200, `drift report with AI ${mode}`);
   }
 });

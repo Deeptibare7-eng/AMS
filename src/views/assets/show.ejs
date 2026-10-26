@@ -77,6 +77,7 @@
 
     <% if (typeof aiOn !== 'undefined' && aiOn.has('data_quality')) { %><%- await include('../ai/_asset_insights') %><% } %>
     <% if (typeof aiOn !== 'undefined' && (aiOn.has('lifecycle') || aiOn.has('anomaly'))) { %><%- await include('../ai/_asset_risk') %><% } %>
+    <% if (typeof aiOn !== 'undefined' && aiOn.has('agents') && await canNav('ai.view', 'ai')) { %><%- await include('../ai/_asset_agents') %><% } %>
 
     <div id="history" class="bg-hams-card border border-white/5 rounded-3xl p-6">
       <h2 class="font-heading font-semibold text-white mb-1">Complete History</h2>

@@ -1,4 +1,4 @@
-// `node bin/hams-cli.js ai:eval [cutoff | search | lifecycle | anomaly | cost | nl]`: measures the AI on the real
+// `node bin/hams-cli.js ai:eval [cutoff | search | lifecycle | anomaly | cost | nl | agents | drift]`: measures the AI on the real
 // register, read-only.
 // 1. Intake classifier, time split (train on assets bought before the cut-off, test on newer).
 // 2. Data-health scan dry run: what it would find, score and propose, without writing anything.
@@ -11,6 +11,8 @@ const searchEval = require('./searchEval');
 const riskEval = require('./riskEval');
 const costEval = require('./costEval');
 const nlEval = require('./nlEval');
+const agentsEval = require('./agentsEval');
+const driftEval = require('./driftEval');
 const dataHealth = require('../quality/dataHealth');
 const fixes = require('../quality/fixes');
 const rules = require('../quality/rules');
@@ -34,11 +36,13 @@ async function dataHealthDryRun() {
   return lines.join('\n');
 }
 
-// arg: a cut-off date for the intake split, or one part only: "search", "lifecycle", "anomaly", "cost" or "nl".
+// arg: a cut-off date for the intake split, or one part only: "search", "lifecycle", "anomaly", "cost", "nl", "agents" or "drift".
 async function main(arg = '2024-01-01') {
-  const only = ['search', 'lifecycle', 'anomaly', 'cost', 'nl'].includes(arg) ? arg : null;
+  const only = ['search', 'lifecycle', 'anomaly', 'cost', 'nl', 'agents', 'drift'].includes(arg) ? arg : null;
   if (only === 'cost') { console.log(costEval.format(await costEval.run())); return; }
   if (only === 'nl') { console.log(nlEval.format(await nlEval.run())); return; }
+  if (only === 'agents') { console.log(agentsEval.format(await agentsEval.run())); return; }
+  if (only === 'drift') { console.log(driftEval.format(await driftEval.run())); return; }
   if (!only) {
     const r = await intakeEval.run({ cutoff: arg });
     console.log(intakeEval.format(r));

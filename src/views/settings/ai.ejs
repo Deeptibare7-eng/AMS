@@ -1,6 +1,6 @@
 <div class="flex flex-col lg:flex-row gap-8">
   <%- await include('_sidebar', { active_tab }) %>
-  <div class="flex-1 space-y-6">
+  <div class="flex-1 min-w-0 space-y-6">
     <div>
       <h1 class="font-heading text-2xl font-bold text-white mb-1">AI</h1>
       <p class="text-sm text-slate-500">In-house AI that runs on this server, with no external AI service or API key. It only recommends: every change waits for a person in AI Approvals.</p>
@@ -43,6 +43,7 @@
           <div class="flex items-start justify-between mb-3">
             <span class="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center"><i data-lucide="<%= c.icon %>" class="w-5 h-5"></i></span>
             <% if (c.effective) { %><span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-400">On</span>
+            <% } else if (c.needs_migration) { %><span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-400">Needs database update</span>
             <% } else if (c.switch) { %><span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-400" title="Its switch is on, but the AI master switch is off">Waiting for master switch</span>
             <% } else { %><span class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-500/10 text-slate-500">Off</span><% } %>
           </div>
@@ -55,10 +56,17 @@
             <% } else { %>Index: not built yet; it builds on the first search<%= searchIndex.error ? ' (last attempt failed: ' + searchIndex.error + ')' : '' %>.<% } %>
           </p>
           <% } %>
+          <% if (c.key === 'agents' && c.effective && agentsInfo) { %>
+          <p class="text-xs text-slate-400 mb-4"><%= agentsInfo.runs_today %> run<%= agentsInfo.runs_today === 1 ? '' : 's' %> today<%= agentsInfo.last ? ' · last: ' + agentsInfo.last.flow + ' ' + formatDateTime(agentsInfo.last.started_at) : '' %> · <a href="<%= hams_url('/ai/runs') %>" class="text-blue-400 hover:text-blue-300">AI Runs →</a></p>
+          <% } %>
+          <% if (c.needs_migration && !c.switch) { %>
+          <p class="text-xs text-amber-300/80">Run <code class="px-1.5 py-0.5 rounded bg-white/5 text-slate-300">node bin/hams-cli.js migrate</code> first. It only adds new <code class="text-slate-300">ai_*</code> tables.</p>
+          <% } else { %>
           <form method="POST" action="<%= hams_url('/settings/ai/flags') %>">
             <%- csrf_field %><input type="hidden" name="key" value="<%= c.key %>"><input type="hidden" name="on" value="<%= c.switch ? '0' : '1' %>">
             <button class="px-4 py-2 rounded-xl text-xs font-medium <%= c.switch ? 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20' %>"><%= c.switch ? 'Switch off' : 'Switch on' %></button>
           </form>
+          <% } %>
         </div>
         <% } %>
       </div>
@@ -141,56 +149,191 @@
     </a>
     <% } %>
 
+    <% if (agents.length) { const agentsOn = capabilities.some(c => c.key === 'agents' && c.effective); %>
     <div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
-      <div class="px-6 pt-6 pb-4">
-        <h2 class="font-heading font-semibold text-white mb-1">Models</h2>
-        <p class="text-xs text-slate-500">Every trained model version with its test metrics. One version per model is active.</p>
+      <div class="px-6 pt-6 pb-4 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 class="font-heading font-semibold text-white mb-1">Agents</h2>
+          <p class="text-xs text-slate-500">One agent per module. Each can only use the tools listed (existing services), reads or proposes but never changes data, and hands over to a person as its escalation says. In a disagreement an agent counts by its confidence and its track record (weight) in AI Approvals.</p>
+        </div>
+        <% if (agentsOn) { %>
+        <div class="flex items-center gap-2">
+          <a href="<%= hams_url('/ai/runs') %>" class="px-3 py-1.5 rounded-xl text-xs bg-white/5 hover:bg-white/10 text-slate-300">AI Runs</a>
+          <form method="POST" action="<%= hams_url('/ai/runs/briefing') %>"><%- csrf_field %><button class="px-3 py-1.5 rounded-xl text-xs bg-blue-600 hover:bg-blue-500 text-white">Run the briefing now</button></form>
+        </div>
+        <% } %>
       </div>
-      <% if (models.length) { %>
+      <% if (agentsOn && agentsInfo && agentsInfo.briefing && agentsInfo.briefing.context && agentsInfo.briefing.context.entries && agentsInfo.briefing.context.entries.briefing) { %>
+      <div class="mx-6 mb-4 p-4 rounded-2xl bg-white/[0.03] text-sm">
+        <div class="text-xs text-slate-500 mb-2">Latest briefing · <%= formatDateTime(agentsInfo.briefing.started_at) %></div>
+        <ul class="space-y-1 text-slate-300"><% for (const l of agentsInfo.briefing.context.entries.briefing.value.lines || []) { %><li>• <%= l.text %></li><% } %></ul>
+      </div>
+      <% } %>
       <div class="table-responsive">
-        <table class="w-full text-sm">
+        <table class="w-full min-w-[760px] text-sm">
           <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
-            <th class="px-6 py-3">Model</th><th class="px-6 py-3">Version</th><th class="px-6 py-3">Status</th><th class="px-6 py-3">Trained</th><th class="px-6 py-3">Metrics</th>
+            <th class="px-6 py-3">Agent</th><th class="px-6 py-3">Goal and escalation</th><th class="px-6 py-3">Tools (whitelist)</th><th class="px-6 py-3">Thresholds</th><th class="px-6 py-3 text-right">Weight</th>
           </tr></thead>
           <tbody class="divide-y divide-white/5">
-            <%
-            // Metric name and value as people read them: shares as %, scores (Brier, calibration error) and times as numbers.
-            const metricName = k => ({ brier: 'Brier score', ece: 'calibration error', auc: 'AUC', weibull_one_shape_brier: 'single-shape Weibull Brier',
-              injected_auc: 'detection AUC (test copies)', flagged_share: 'flagged', mrr10: 'MRR@10', hit10: 'top-10 hit', old_search_mrr10: 'old search MRR@10',
-              cv_accuracy: 'cross-validated correct', cv_macroF1: 'cross-validated macro-F1', nb_macroF1: 'Naive Bayes macro-F1', lr_macroF1: 'logistic regression macro-F1', utterances: 'seed questions' })[k]
-              || k.replace(/_macroF1$/, ' macro-F1').replace(/_accuracy$/, ' correct').replace(/_ms$/, ' (ms)').replace(/_/g, ' ');
-            const metricValue = (k, v) => (typeof v !== 'number' ? v : /_ms$/.test(k) ? v.toFixed(1) : /brier|^ece$/.test(k) ? v.toFixed(3) : v >= 0 && v <= 1 ? (v * 100).toFixed(1) + '%' : v);
-            const metricNote = { search_bm25: 'on labelled queries generated from the register; time to rank in ms', lifecycle_weibull: 'on 20% of assets held out: was each already retired at its age (lower Brier is better)',
-              anomaly_iforest: 'corrupted copies of real assets among real ones; share of active assets flagged',
-              nl_intent: '5-fold cross-validation on the seed questions; the better of the two classifiers is kept' };
-            %>
-            <% for (const m of models) { %>
-            <tr>
-              <td class="px-6 py-3 text-white"><%= m.name %></td>
-              <td class="px-6 py-3 text-slate-400">v<%= m.version %></td>
-              <td class="px-6 py-3"><span class="px-2 py-0.5 rounded text-xs <%= m.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-500/10 text-slate-500' %>"><%= m.status %></span></td>
-              <td class="px-6 py-3 text-slate-400"><%= formatDateTime(m.trained_at) %></td>
-              <td class="px-6 py-3 text-slate-400 text-xs"><%= m.metrics ? Object.entries(m.metrics).map(([k, v]) => { const n = metricName(k); return n.charAt(0).toUpperCase() + n.slice(1) + ' ' + metricValue(k, v); }).join(' · ') : '—' %>
-                <div class="text-[10px] text-slate-600"><%= metricNote[m.name] || 'on the newest 10% of assets, held out from training' %></div></td>
+            <% for (const a of agents) { const w = agentsInfo && agentsInfo.weights ? agentsInfo.weights[a.name] : undefined; %>
+            <tr class="<%= agentsOn && a.available ? '' : 'opacity-60' %>">
+              <td class="px-6 py-3 align-top"><div class="text-white"><%= a.name %></div><div class="text-xs text-slate-500"><%= a.module %></div>
+                <div class="text-[11px] <%= agentsOn && a.available ? 'text-emerald-400' : 'text-slate-500' %>"><%= !agentsOn ? 'Agents off' : a.available ? 'Active' : 'Idle: ' + a.needs.join(' or ') + ' off' %></div></td>
+              <td class="px-6 py-3 align-top text-xs text-slate-400"><div class="text-slate-300 mb-1"><%= a.goal %></div><%= a.escalation %></td>
+              <td class="px-6 py-3 align-top text-xs text-slate-400 font-mono"><%= a.tools.join(', ') %></td>
+              <td class="px-6 py-3 align-top text-xs text-slate-400"><%= Object.entries(a.thresholds || {}).map(([k, v]) => k.replace(/_/g, ' ').replace(/([A-Z])/g, ' $1').toLowerCase() + ' ' + (typeof v === 'number' && v < 1 ? Math.round(v * 100) + '%' : v)).join(' · ') || '—' %></td>
+              <td class="px-6 py-3 align-top text-right text-xs text-slate-300"><%= w !== undefined ? w.toFixed(2) : '0.75' %></td>
             </tr>
             <% } %>
           </tbody>
         </table>
       </div>
+    </div>
+    <% } %>
+
+    <%
+    // Metric name and value as people read them: shares as %, scores (Brier, calibration error) and times as numbers.
+    const metricName = k => ({ brier: 'Brier score', ece: 'calibration error', auc: 'AUC', weibull_one_shape_brier: 'single-shape Weibull Brier',
+      injected_auc: 'detection AUC (test copies)', flagged_share: 'flagged', mrr10: 'MRR@10', hit10: 'top-10 hit', old_search_mrr10: 'old search MRR@10',
+      cv_accuracy: 'cross-validated correct', cv_macroF1: 'cross-validated macro-F1', nb_macroF1: 'Naive Bayes macro-F1', lr_macroF1: 'logistic regression macro-F1', utterances: 'training questions' })[k]
+      || k.replace(/_macroF1$/, ' macro-F1').replace(/_accuracy$/, ' correct').replace(/_ms$/, ' (ms)').replace(/_/g, ' ');
+    const metricValue = (k, v) => (typeof v !== 'number' ? v : /_ms$/.test(k) ? v.toFixed(1) : /brier|^ece$/.test(k) ? v.toFixed(3) : v >= 0 && v <= 1 ? (v * 100).toFixed(1) + '%' : v);
+    const metricText = m => (m ? Object.entries(m).map(([k, v]) => { const n = metricName(k); return n.charAt(0).toUpperCase() + n.slice(1) + ' ' + metricValue(k, v); }).join(' · ') : '—');
+    const metricNote = { search_bm25: 'on labelled queries generated from the register; time to rank in ms', lifecycle_weibull: 'on 20% of assets held out: was each already retired at its age (lower Brier is better)',
+      anomaly_iforest: 'corrupted copies of real assets among real ones; share of active assets flagged',
+      nl_intent: '5-fold cross-validation on the training questions; the better of the two classifiers is kept', intake_classifier: 'on the newest 10% of assets, held out from training',
+      spend_holt_winters: 'rolling backtest on quarterly purchase-order spend' };
+    const DS = { stable: 'emerald', moderate: 'amber', significant: 'rose' };
+    const driftOf = name => (drift || []).find(d => d.model_name === name);
+    %>
+    <div id="models" class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+      <div class="px-6 pt-6 pb-4">
+        <h2 class="font-heading font-semibold text-white mb-1">Models</h2>
+        <p class="text-xs text-slate-500">Every trained version with its test numbers. A version you activate or roll back to is pinned: scheduled retraining then keeps new versions as candidates until you unpin it. Every action is written to the audit log.</p>
+      </div>
+      <% if (modelsOverview.length) { %>
+      <div class="divide-y divide-white/5">
+        <% for (const m of modelsOverview) { const d = driftOf(m.name); %>
+        <div class="px-6 py-5">
+          <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-white font-medium"><%= m.label %></span>
+                <span class="text-xs text-slate-500 font-mono"><%= m.name %></span>
+                <% if (m.active) { %><span class="px-2 py-0.5 rounded-md text-xs bg-emerald-500/10 text-emerald-400">v<%= m.active.version %> active</span><% } %>
+                <% if (m.pinned) { %><span class="px-2 py-0.5 rounded-md text-xs bg-blue-500/10 text-blue-300 flex items-center gap-1" title="Retraining keeps new versions as candidates"><i data-lucide="pin" class="w-3 h-3"></i>pinned to v<%= m.pinned %></span><% } %>
+                <% if (d && d.status !== 'stable') { %><span class="px-2 py-0.5 rounded-md text-xs bg-<%= DS[d.status] %>-500/10 text-<%= DS[d.status] %>-400"><%= d.status %> drift</span><% } %>
+              </div>
+              <% if (m.purpose) { %><p class="text-xs text-slate-500 mt-1"><%= m.purpose %></p><% } %>
+              <% if (m.note) { %><p class="text-[11px] text-slate-600 mt-1"><%= m.note %></p><% } %>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <% if (m.canRetrain) { %>
+              <form method="POST" action="<%= hams_url('/settings/ai/models/' + m.name + '/retrain') %>" title="<%= m.retrainLabel %>"><%- csrf_field %><button class="px-3 py-1.5 rounded-xl text-xs bg-white/5 hover:bg-white/10 text-slate-300">Retrain now</button></form>
+              <% } %>
+              <% if (m.versioned && m.previous) { %>
+              <form method="POST" action="<%= hams_url('/settings/ai/models/' + m.name + '/rollback') %>" data-confirm="Roll <%= m.label %> back to v<%= m.previous.version %>? It will be pinned."><%- csrf_field %><button class="px-3 py-1.5 rounded-xl text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-400">Roll back to v<%= m.previous.version %></button></form>
+              <% } %>
+              <% if (m.pinned) { %>
+              <form method="POST" action="<%= hams_url('/settings/ai/models/' + m.name + '/unpin') %>"><%- csrf_field %><button class="px-3 py-1.5 rounded-xl text-xs bg-white/5 hover:bg-white/10 text-slate-300">Unpin</button></form>
+              <% } %>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[640px] text-xs">
+              <thead><tr class="text-left text-slate-500"><th class="py-1 pr-4">Version</th><th class="py-1 pr-4">Status</th><th class="py-1 pr-4">Trained</th><th class="py-1 pr-4">Test numbers</th><th class="py-1"></th></tr></thead>
+              <tbody>
+                <% for (const v of m.versions) { %>
+                <tr class="border-t border-white/5">
+                  <td class="py-1.5 pr-4 text-slate-300">v<%= v.version %></td>
+                  <td class="py-1.5 pr-4"><span class="px-1.5 py-0.5 rounded <%= v.status === 'active' ? 'bg-emerald-500/10 text-emerald-400' : v.status === 'candidate' ? 'bg-sky-500/10 text-sky-400' : 'bg-slate-500/10 text-slate-500' %>"><%= v.status %></span></td>
+                  <td class="py-1.5 pr-4 text-slate-400 whitespace-nowrap"><%= formatDateTime(v.trained_at) %><%= v.training && v.training.trigger ? ' · ' + v.training.trigger : '' %></td>
+                  <td class="py-1.5 pr-4 text-slate-400"><%= metricText(v.metrics) %></td>
+                  <td class="py-1.5 text-right">
+                    <% if (m.versioned && v.status !== 'active') { %>
+                    <form method="POST" action="<%= hams_url('/settings/ai/models/' + m.name + '/activate') %>" data-confirm="Make v<%= v.version %> of <%= m.label %> the active version? It will be pinned."><%- csrf_field %><input type="hidden" name="version" value="<%= v.version %>"><button class="text-blue-400 hover:text-blue-300">Activate</button></form>
+                    <% } %>
+                  </td>
+                </tr>
+                <% } %>
+              </tbody>
+            </table>
+            <p class="text-[10px] text-slate-600 mt-1"><%= metricNote[m.name] || '' %></p>
+          </div>
+        </div>
+        <% } %>
+      </div>
       <% } else { %><p class="px-6 pb-6 text-sm text-slate-500">No models trained yet.</p><% } %>
     </div>
 
+    <% if (driftInstalled) { %>
+    <div id="drift" class="bg-hams-card border border-white/5 rounded-3xl p-6">
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+        <div>
+          <h2 class="font-heading font-semibold text-white mb-1">Drift</h2>
+          <p class="text-xs text-slate-500">How far today's register has moved from the data each model learnt from (PSI per feature: under 0.1 stable, 0.1–0.25 moderate, over 0.25 significant). Checked daily at 05:30; significant drift starts a retrain unless the version is pinned.</p>
+        </div>
+        <a href="<%= hams_url('/settings/ai/drift') %>" class="px-3 py-1.5 rounded-xl text-xs bg-white/5 hover:bg-white/10 text-slate-300">Drift report</a>
+      </div>
+      <% if (drift.length) { %>
+      <div class="flex flex-wrap gap-3">
+        <% for (const d of drift) { const m = modelsOverview.find(x => x.name === d.model_name); %>
+        <div class="rounded-2xl border border-white/10 px-4 py-3 text-sm min-w-[14rem]">
+          <div class="text-white"><%= m ? m.label : d.model_name %> <span class="text-xs text-slate-500">v<%= d.model_version %></span></div>
+          <div class="text-xs mt-1"><span class="px-1.5 py-0.5 rounded bg-<%= DS[d.status] || 'slate' %>-500/10 text-<%= DS[d.status] || 'slate' %>-400"><%= d.status %></span> <span class="text-slate-400">max PSI <%= Number(d.max_psi).toFixed(2) %> · <%= formatDateTime(d.checked_at) %></span></div>
+          <% if (d.action) { %><div class="text-[11px] text-slate-500 mt-1"><%= d.action %></div><% } %>
+        </div>
+        <% } %>
+      </div>
+      <% } else { %><p class="text-sm text-slate-500">No check yet. It runs at 05:30 while Intake, Data health, Refresh risk or Cost forecast is on (or Run now under AI jobs).</p><% } %>
+    </div>
+    <% } %>
+
+    <% if (feedback) { const pct = x => (x === null || x === undefined ? '—' : Math.round(x * 100) + '%'); %>
+    <div id="feedback" class="bg-hams-card border border-white/5 rounded-3xl p-6">
+      <h2 class="font-heading font-semibold text-white mb-1">Feedback</h2>
+      <p class="text-xs text-slate-500 mb-4">Every decision people make is kept as a training label (<%= Number(feedback.total).toLocaleString('en-IN') %> so far). Rejected recommendations are not proposed again while they are the same<%= feedback.suppressed ? ` (${feedback.suppressed} held back since the last restart)` : '' %>; accepted category fixes become training data for the next intake model; taught questions retrain the question classifier; the agents' weights follow their record.</p>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm mb-5">
+        <div class="rounded-2xl bg-white/[0.03] p-4"><div class="text-xs text-slate-500">Unusual assets confirmed by people</div><div class="text-white text-lg font-semibold"><%= pct(feedback.anomaly.precision) %></div><div class="text-[11px] text-slate-500"><%= feedback.anomaly.issues %> real issues, <%= feedback.anomaly.expected %> expected</div></div>
+        <div class="rounded-2xl bg-white/[0.03] p-4"><div class="text-xs text-slate-500">Smart search, real clicks</div><div class="text-white text-lg font-semibold"><%= feedback.search.clicks ? 'MRR@10 ' + pct(feedback.search.mrr10) : '—' %></div><div class="text-[11px] text-slate-500"><%= feedback.search.clicks ? feedback.search.clicks + ' opened results, ' + pct(feedback.search.top1) + ' the first one' : 'no opened results yet' %></div></div>
+        <div class="rounded-2xl bg-white/[0.03] p-4"><div class="text-xs text-slate-500">Questions</div><div class="text-white text-lg font-semibold"><%= feedback.nl.taught %> taught</div><div class="text-[11px] text-slate-500"><%= feedback.nl.missed %> missed, <%= feedback.nl.not_meant %> "not what I meant"</div></div>
+      </div>
+      <% if (feedback.byType.length) { %>
+      <div class="overflow-x-auto mb-5">
+        <table class="w-full min-w-[560px] text-xs">
+          <thead><tr class="text-left text-slate-500"><th class="py-1 pr-4">Recommendation</th><th class="py-1 pr-4 text-right">Accepted</th><th class="py-1 pr-4 text-right">Other option</th><th class="py-1 pr-4 text-right">Rejected</th><th class="py-1 text-right">Accepted as proposed</th></tr></thead>
+          <tbody>
+            <% for (const t of feedback.byType) { %><tr class="border-t border-white/5"><td class="py-1.5 pr-4 text-slate-300"><%= t.label %></td><td class="py-1.5 pr-4 text-right text-slate-300"><%= t.accepted %></td><td class="py-1.5 pr-4 text-right text-slate-300"><%= t.edited %></td><td class="py-1.5 pr-4 text-right text-slate-300"><%= t.rejected %></td><td class="py-1.5 text-right text-white"><%= pct(t.rate) %></td></tr><% } %>
+          </tbody>
+        </table>
+      </div>
+      <% } %>
+      <% if (feedback.byVersion.length) { %>
+      <div class="text-xs text-slate-500 mb-2">People's verdict by model version</div>
+      <div class="flex flex-wrap gap-2 mb-5 text-xs">
+        <% for (const v of feedback.byVersion) { const n = v.accepted + v.rejected + v.edited; %><span class="px-2.5 py-1 rounded-lg bg-white/5 text-slate-300"><%= v.model_name %> v<%= v.model_version %>: <%= pct(v.accepted / Math.max(1, n)) %> of <%= n %></span><% } %>
+      </div>
+      <% } %>
+      <% if (feedback.overrides.length) { %>
+      <div class="text-xs text-slate-500 mb-2">Latest overrides</div>
+      <ul class="space-y-1 text-xs">
+        <% for (const o of feedback.overrides) { %><li class="text-slate-400"><span class="text-slate-300"><%= o.label === 'edited' ? 'Other option chosen' : 'Rejected' %></span> · <%= o.title || o.capability %><%= o.user_name ? ' · ' + o.user_name : '' %> · <%= formatDateTime(o.created_at) %></li><% } %>
+      </ul>
+      <% } %>
+    </div>
+    <% } %>
+
     <% if (nlMisses) { %>
-    <div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+    <div id="questions" class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
       <div class="px-6 pt-6 pb-4">
         <h2 class="font-heading font-semibold text-white mb-1">Questions the assistant didn't answer well</h2>
-        <p class="text-xs text-slate-500">Questions it fell back to search on, was unsure about, or someone marked "Not what I meant". Add them to the seed set (src/ai/nl/seed.js) to teach it.</p>
+        <p class="text-xs text-slate-500">Questions it fell back to search on, was unsure about, or someone marked "Not what I meant". Teach one what kind of question it was: the classifier learns it on the next question (and it is in the audit log).</p>
       </div>
       <% if (nlMisses.length) { %>
       <div class="table-responsive">
-        <table class="w-full text-sm">
+        <table class="w-full min-w-[760px] text-sm">
           <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
-            <th class="px-6 py-3">Question</th><th class="px-6 py-3">Read as</th><th class="px-6 py-3">Why kept</th><th class="px-6 py-3">When</th>
+            <th class="px-6 py-3">Question</th><th class="px-6 py-3">Read as</th><th class="px-6 py-3">Why kept</th><th class="px-6 py-3">When</th><th class="px-6 py-3">Teach</th>
           </tr></thead>
           <tbody class="divide-y divide-white/5">
             <% for (const m of nlMisses) { const p = m.predicted || {}; %>
@@ -199,6 +342,17 @@
               <td class="px-6 py-3 text-slate-400"><%= p.intent ? p.intent.replace('_', ' ') + (p.confidence != null ? ' (' + Math.round(p.confidence * 100) + '%)' : '') : '—' %></td>
               <td class="px-6 py-3 text-slate-400"><%= m.label === 'rejected' ? 'Not what I meant' : 'Unsure / searched instead' %></td>
               <td class="px-6 py-3 text-slate-400"><%= formatDateTime(m.created_at) %></td>
+              <td class="px-6 py-3">
+                <% if (m.taught) { %><span class="text-xs text-emerald-400">Taught: <%= m.taught.replace('_', ' ') %></span>
+                <% } else if (p.q) { %>
+                <form method="POST" action="<%= hams_url('/settings/ai/nl/teach') %>" class="flex items-center gap-2"><%- csrf_field %><input type="hidden" name="q" value="<%= p.q %>">
+                  <select name="intent" class="px-2 py-1 rounded-lg bg-hams-bg border border-white/10 text-xs text-slate-200">
+                    <% for (const i of nlIntents) { %><option value="<%= i %>"><%= i.replace('_', ' ') %></option><% } %>
+                  </select>
+                  <button class="px-2.5 py-1 rounded-lg text-xs bg-white/5 hover:bg-white/10 text-slate-300">Teach</button>
+                </form>
+                <% } %>
+              </td>
             </tr>
             <% } %>
           </tbody>

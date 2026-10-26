@@ -463,7 +463,187 @@ all unusual.
 - **Real register:** 0 licences and 0 software records, so it is dormant. It is tested on synthetic licences
   (all 10 rules fire).
 
-## 11. Feature snapshots (M1, `features/`)
+## 11. Questions in plain language (M6, `nl/`, `agents/`)
+
+A question typed in Ctrl+K (Ask) or the Hardware box (Ask) becomes Hardware filters, with an answer built
+from the existing services. There is no LLM: rules find the things named, a small classifier decides what
+kind of question it is, and the answer is a templated sentence.
+
+- **Entities** (`nl/entities.js`, rules + the register's vocabularies from `nl/vocab.js`):
+  - categories (with synonyms such as "lappy", "VM"), makers, model numbers, and places. A place is a word
+    from a Machine Name site or an Asset Location, plus site codes and other names (L&T and TX = Powai,
+    BLR = Bangalore, QBX = Pune, …);
+  - statuses (in stock, in use, retired, in repair, lost, returned to client), with two exceptions:
+    "likely to be retired" is about the future, so it is read as refresh risk, and "data is missing" is a
+    data issue, not a lost asset;
+  - dates relative to today: warranty ending next month / in the next 3 months / already ended / still
+    valid; bought before 2020 / in the last 2 years / older than 5 years;
+  - RAM ("at least 16 GB"), OS (Windows 11 / 10 / older / out of support, macOS, Linux), holders (CTIDs:
+    "assigned to …", "…'s laptop", or a CTID on its own), asset tags and FAMS numbers, data-health issues
+    ("no FAMS barcode", "missing cost"), sort ("oldest", "most expensive"), "top 5";
+  - typos: one edit away, for words of 5+ letters ("lenvo" → Lenovo), noted in the answer's why;
+  - requests to change something ("retire …", "assign this laptop to …", "delete …") are flagged.
+- **The rest of the question,** with the things found replaced by placeholders ("CAT in PLACE with
+  WARRANTY"), goes to the intent classifier.
+- **Intent classifier** (`nl/intent.js`):
+  - **Classes:** find, count, refresh, unusual, data_issues, cost, who, navigate.
+  - **Training data:** 265 seed questions written for it (`nl/seed.js`), in placeholder form, so it learns
+    how questions are asked, not which laptops exist.
+  - **Model:** words and word pairs; Naive Bayes and logistic regression are both trained, and the one with
+    the better macro-F1 in 5-fold cross-validation is kept (logistic regression: 85.1%, Naive Bayes 79.8%).
+    Temperature-calibrated.
+  - **Unknown words lower the confidence:** it is multiplied by the share of the question's content words
+    the seed set knows, so "tell me a joke" is 0% sure.
+  - **Rules on top:** a change request is refused (100%); a lone asset tag is "who"; below 30% with things
+    named it lists them; below 30% with nothing named it falls back to smart search and keeps the question.
+- **Filters, never SQL.** The understood question becomes query-string pairs from a fixed list of keys
+  (`nl/query.js`). Each value is an id from the register, an ISO date, a number in range or a word from a
+  fixed list. The Hardware route checks them again, and `assetService` runs them as parameters. A word
+  nothing understood goes to the free-text search (smart search when it is on). If it would empty the
+  result, it is dropped and the why says so.
+- **Measured** (`node bin/hams-cli.js ai:eval nl`, read-only, on the real register's vocabularies):
+  - **Test set:** 93 hand-written questions with expected intent and slots (`nl/testset.js`; made-up CTIDs
+    and tags). None is in the seed set.
+  - **Intent:** 100% correct, macro-F1 100%.
+  - **Entities:** precision 95.4%, recall 100%, F1 97.6%. The extra slots counted as errors are mostly
+    things named in how-to and change questions ("how do I add a laptop" finds "laptop"), which those answers
+    don't use.
+  - **Caveat:** three rules were adjusted after seeing errors on this test set: the unknown-word penalty
+    counts content words only, "likely to be retired" and "data is missing". So it is no longer an untouched
+    held-out set. The cross-validated 85.1% on the seed set is the conservative figure.
+  - **SQL safety:** 553 questions (injection attempts, random noise, the test set) gave 781 filter values,
+    0 outside the whitelist. The route rejects bad values again (tested).
+  - **Speed:** median 0.1 ms to understand a question; training takes about 0.1 s.
+- **Limits:**
+  - The directory holds CTIDs only, so "Sundeep's laptop" works only with the CTID.
+  - "Pune" covers both Pune sites and every Asset Location named Pune.
+  - "Top 5" is used in the answer's examples; the list shows every match, sorted.
+  - Retirement dates aren't recorded, so "retired last year" gives the Retired filter only. The chips show
+    that.
+  - Follow-up questions ("and in Chennai?") aren't understood.
+
+## 12. Agents and the orchestrator (M7, `agents/`, `orchestrator/`)
+
+No new model: the agents use the models above, and the orchestrator weighs what they say.
+
+- **The agents** each claim values for a target's fields, post findings for people, or both:
+  - **IntakeAgent:** category and maker from the intake model. It claims the recorded value too when it
+    agrees, so it can confirm as well as contest. Duplicates are findings. Claims at 60% or more.
+  - **DataQualityAgent:** a "category looks wrong" issue from the last scan is a claim for the other category
+    (at the issue's confidence). A scan that saw the asset as it is now, with no category issue, confirms the
+    recorded category at 60%. A scan older than the asset's last change says nothing.
+  - **AnomalyAgent:** findings only.
+  - **LifecycleCostAgent:** risk (a finding when high). On a repair it claims "replace" at 12-month risk
+    ≥ 50% (confidence = the risk), or "repair" below 20%.
+  - **MaintenanceAgent:** "replace" at 80% after more than two repairs in 12 months, or repairs costing half a
+    new one; 65% at two repairs. Otherwise "repair" at 60–70%.
+  - **ComplianceAgent, ReportAgent, AssistantAgent:** findings, the briefing, answers.
+- **Conflict resolution** (`orchestrator/resolve.js`), per target field and claimed value:
+  - support = Σ weight × confidence; share = support / total support; agreement = 1 − Π(1 − confidence);
+    score = share × agreement.
+  - **keep:** the best value is the recorded one, unless a strong dissent remains (agreement ≥ 80% and a
+    quarter of the weighted opinion, or score ≥ 45%). Then it is **review**, proposing the dissent.
+  - **propose:** two or more agents back it with score ≥ 60%, or one with score ≥ 90%, and no rival has a
+    quarter of the weight.
+  - **review:** score ≥ 45%, or agents disagree. It is proposed but marked for a closer look, with the options.
+  - **drop:** below that. Kept in the trace only.
+  - Example: IntakeAgent 92% and DataQualityAgent 85% for the same value → share 1, agreement 98.8%, propose.
+    The same two for different values → 55% / 45% share, review with both options.
+- **Agent weights** (`orchestrator/weights.js`): 0.5 + 0.5 × (accepted + 1) / (decided + 2), from AI
+  Approvals. 0.75 with no history.
+  - Credit goes to the agents that backed the decided value.
+  - "Edited" (a person picked another option) counts against the proposed value's agents and for the chosen
+    option's agents.
+- **Measured on the real register** (`node bin/hams-cli.js ai:eval agents`, read-only: the asset-review
+  steps and the resolution, with nothing proposed or traced):
+  - **Assets:** the 22 the data-health scan says are mis-filed, plus a fixed random sample of 400 (422 in all).
+  - **Steps:** 1,688 run, 0 failed. A first run showed 3 failed steps that did not recur; their errors weren't
+    recorded then, and a run retries a failed step once.
+  - **Speed:** median 198 ms per asset review, p95 312 ms. It runs in the background after an event, never in
+    the request. The slowest tool is the duplicate check, a scan of every serial (about 75 ms).
+  - **Claims:** IntakeAgent 841, DataQualityAgent 301.
+  - **Findings:** DataQualityAgent 242, LifecycleCostAgent 34, IntakeAgent 31 (possible duplicates),
+    AnomalyAgent 6.
+  - **Decisions:** 400 categories and 421 makers confirmed as recorded; 8 category changes proposed, 14 for a
+    closer look; 1 maker change proposed. All 22 are already covered by an open data-health recommendation,
+    so a run wouldn't add duplicates.
+  - **The 22 mis-filed assets:**
+    - IntakeAgent agrees with DataQualityAgent on 6 (e.g. Latitude E5440/E5450 filed as VM → Laptop, 96–98%).
+    - It confirms the recorded category on 13, mostly VM at over 99%: a real disagreement, sent for a closer
+      look.
+    - It says nothing on 3.
+    - Outcomes: 8 propose, 14 review.
+- **Limits:**
+  - IntakeAgent and DataQualityAgent both learn from the same register, so they are not fully independent.
+    Agreement between them overstates certainty somewhat, and their disagreements are the useful signal.
+  - MaintenanceAgent and ComplianceAgent have nothing to work on today: 0 maintenance records and 0 licence
+    or software records. They are tested on synthetic data.
+  - The agents' weights start equal (0.75) and only learn from decisions made in AI Approvals.
+
+## 13. Governance: drift, the feedback loop, versions (M8, `governance/`)
+
+**Drift** (`governance/drift.js`, `driftSpecs.js`, `driftCheck.js`): how far today's register has moved
+from the data a model's active version learnt from.
+- **Which models:** the two trained once and used for a while.
+  - **Intake classifier:** category, maker, first word of the name, has a model number, purchase year.
+  - **Refresh-risk curves:** category, age, purchase cost, RAM, OS family, stock site, retired share.
+  - The others are rebuilt from the data on every run, so there is nothing for them to drift from.
+- **Reference:** a profile of the data, stored with the version when it is trained. It holds, per feature:
+  - **numbers:** decile edges and shares, 400 evenly spaced values for the KS test, the missing share;
+  - **categories:** the 30 most common values' shares plus "other" and missing.
+  - A version trained before drift checks gets its reference at its first check, and the report says so.
+- **PSI per feature:** Σ (today − reference) × ln(today / reference) over the reference's bins (today's values
+  binned exactly, every value). Under 0.1 stable, 0.1–0.25 moderate, over 0.25 significant. Two samples of
+  the same distribution: 0.002; a clear shift: 0.7–0.9 (unit tests).
+- **Numbers:**
+  - The two-sample KS test (D and an asymptotic p-value) is reported next to PSI.
+  - A number with 12 or fewer distinct values is compared as categories (quantile bins would pile it into one
+    bin and exaggerate any shift).
+- **What happens on significant drift:**
+  - An audit entry (`AI_DRIFT_DETECTED`) and a retrain in the background through the job runner.
+  - The new version becomes active only if it scores at least as well (each training job's own rule), and
+    only if no version is pinned.
+  - At most one retrain per reason a week: if drift stays after a retrain, the data needs a person's look.
+- **On the real register** (`node bin/hams-cli.js ai:eval drift`, read-only), assets bought before 2024
+  (21,389) as the reference and those bought since (5,347) as today:
+  - **Intake inputs:** significant (category PSI 1.41: laptops 63% → 98%; maker 0.71: Dell 55% → 73%).
+  - **Refresh-risk inputs:** significant:
+    - purchase cost: PSI 4.0, mean ₹ (figure kept out of the public copy) → ₹ (figure kept out of the public copy) missing 21% → 34%;
+    - OS: Windows 11 18% → 85%;
+    - RAM: 12.7 → 18.0 GB on average;
+    - retired: 41% → 0% (new assets aren't retired yet).
+  - The live check compares the whole register with what a version learnt from, which moves much more slowly.
+    But the fleet is being renewed fast, so expect retraining to matter.
+
+**The feedback loop:**
+- **Rejecting teaches:**
+  - A recommendation that was rejected is not proposed again while it would make the same change (same key
+    and same change, ignoring scores and which agents backed it).
+  - If it has changed (more assets in a group, another value), it is proposed again with "a similar
+    recommendation was rejected on …" in its reasons. This covers every kind (data health, agents, plans).
+- **Accepted changes:** accepted category fixes change the assets themselves, so the next intake model learns
+  from them. 20 or more category decisions since the active version was trained start a retrain at the next
+  drift check.
+- **Questions:** a missed question taught its kind on Settings > AI is added, masked like the seed set, to the
+  classifier's training. A version is identified by the seed version and the taught questions, so it retrains
+  once when they change. Test: a nonsense verb taught as "count" is answered as a count right after.
+- **Agents:** their weights follow their record (§12).
+- **Measured:** Settings > AI > Feedback shows:
+  - the share accepted as proposed, by kind and by model version (people's verdict on each version);
+  - unusual assets confirmed by people;
+  - real-click search quality (MRR@10 of the opened results);
+  - taught and missed questions;
+  - the latest overrides.
+
+**Versions** (`governance/models.js`, `registry.js`):
+- **Intake and refresh risk:** versions matter at run time. They can be rolled back or activated by hand, which
+  pins the version: scheduled retraining keeps new versions as candidates (`AI_MODEL_KEPT_CANDIDATE`) until
+  someone unpins it. Changing the refresh-risk version re-scores every asset with it (no retraining).
+- **Unusual assets, smart search, spend pace:** fitted or rebuilt from the data with fixed settings on every
+  run. A version records the settings and the measured numbers.
+- **Question classifier:** retrained when its training questions change.
+
+## 14. Feature snapshots (M1, `features/`)
 
 These have no model yet. They are the history that later models (refresh risk, anomalies) will learn from.
 See ARCHITECTURE.md.

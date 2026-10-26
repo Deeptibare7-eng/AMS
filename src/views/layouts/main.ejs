@@ -134,6 +134,9 @@ input, select, textarea { background: var(--hams-bg); border: 1px solid var(--ha
         <% if (typeof aiOn !== 'undefined' && aiOn.has('cost') && await canNav('assets.view', 'assets')) { %>
         <a href="<%= hams_url('/ai/planning') %>" class="<%= navClass('/ai/planning') %>"><i data-lucide="calendar-range" class="w-4 h-4"></i>Refresh Planning</a>
         <% } %>
+        <% if (typeof aiOn !== 'undefined' && aiOn.has('agents') && await canNav('ai.manage', 'ai')) { %>
+        <a href="<%= hams_url('/ai/runs') %>" class="<%= navClass('/ai/runs') %>"><i data-lucide="workflow" class="w-4 h-4"></i>AI Runs</a>
+        <% } %>
         <% } %>
       </div>
       <% const canPeopleView = await canNav('personnel.view', 'personnel');

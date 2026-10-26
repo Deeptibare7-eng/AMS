@@ -36,7 +36,8 @@ router.get('/settings/ai', authRequired, perm('settings.manage'), mod('settings'
   try {
     const installed = await flags.installed();
     const user = await currentUser(req);
-    const data = { installed, active_tab: 'ai', module: null, master: false, capabilities: [], snapshot: null, jobs: [], models: [], pending: 0, dq: null, searchIndex: aiSearch.summary(), nlMisses: null };
+    const data = { installed, active_tab: 'ai', module: null, master: false, capabilities: [], snapshot: null, jobs: [], models: [], pending: 0, dq: null, searchIndex: aiSearch.summary(), nlMisses: null, agentsInfo: null, agents: [],
+      modelsOverview: [], feedback: null, drift: [], driftInstalled: false, nlIntents: [] };
     if (installed) {
       data.module = await flags.aiModule();
       data.master = await flags.masterOn();
@@ -48,6 +49,18 @@ router.get('/settings/ai', authRequired, perm('settings.manage'), mod('settings'
       data.pending = await approvals.pendingCount(user);
       if (await dqInstalled()) data.dq = await require('../ai/quality/dataHealth').latest();
       if (await flags.isOn('nl')) data.nlMisses = await require('../ai/agents/assistant').misses(15);
+      const on = await flags.enabledSet();
+      // M8: models with versions and actions, the feedback loop, drift.
+      data.modelsOverview = await require('../ai/governance/models').overview();
+      data.feedback = await require('../ai/governance/feedback').summary();
+      data.driftInstalled = await flags.hasTable('ai_drift');
+      data.drift = data.driftInstalled ? await require('../ai/governance/driftCheck').latest() : [];
+      data.nlIntents = require('../ai/agents/assistant').INTENTS;
+      data.agents = require('../ai/agents').describeAll(on);
+      if (on.has('agents')) {
+        const runTrace = require('../ai/orchestrator/trace');
+        data.agentsInfo = { ...(await runTrace.stats()), briefing: await runTrace.latest('fleet.review'), weights: (await require('../ai/orchestrator/weights').load()).weights };
+      }
     }
     res.renderPage('settings/ai', data);
   } catch (err) { next(err); }
@@ -110,38 +123,220 @@ router.post('/settings/ai/jobs/:key/run', authRequired, csrfProtect, perm('setti
   } catch (err) { next(err); }
 });
 
+// ─── Models, drift and the feedback loop (M8) ───
+const governance = require('../ai/governance/models');
+const modelAction = (fn, done) => async (req, res, next) => {
+  try {
+    const name = String(req.params.name || '');
+    if (!governance.CATALOG[name]) { req.flash('error', 'Unknown model.'); return res.redirect(hamsUrl('/settings/ai') + '#models'); }
+    try {
+      const msg = await fn(name, await currentUser(req), req);
+      req.flash('success', msg || done);
+    } catch (err) {
+      if (!err.status || err.status >= 500) throw err;
+      req.flash('error', err.message);
+    }
+    res.redirect(hamsUrl('/settings/ai') + '#models');
+  } catch (err) { next(err); }
+};
+const label = name => governance.CATALOG[name].label;
+
+router.post('/settings/ai/models/:name/retrain', authRequired, csrfProtect, perm('settings.manage'), mod('settings'), modelAction(async (name, user) => {
+  const r = await governance.retrain(name, user);
+  return r && r.summary ? r.summary : `${label(name)}: retraining started in the background. Refresh in a minute.`;
+}));
+router.post('/settings/ai/models/:name/rollback', authRequired, csrfProtect, perm('settings.manage'), mod('settings'), modelAction(async (name, user) => {
+  const v = await governance.rollback(name, user);
+  return `${label(name)} rolled back to v${v} and pinned: scheduled retraining keeps new versions as candidates until you unpin it.`;
+}));
+router.post('/settings/ai/models/:name/activate', authRequired, csrfProtect, perm('settings.manage'), mod('settings'), modelAction(async (name, user, req) => {
+  const v = intOr(req.body.version, 0);
+  if (!v) throw Object.assign(new Error('Pick a version.'), { status: 422 });
+  await governance.activate(name, v, user);
+  return `${label(name)} v${v} is now active and pinned.`;
+}));
+router.post('/settings/ai/models/:name/unpin', authRequired, csrfProtect, perm('settings.manage'), mod('settings'), modelAction(async (name, user) => {
+  await registry.unpin(name, user);
+  return `${label(name)} unpinned: scheduled retraining may activate better versions again.`;
+}));
+
+// The drift report: per checked model, the latest check feature by feature and the history.
+router.get('/settings/ai/drift', authRequired, perm('settings.manage'), mod('settings'), async (req, res, next) => {
+  try {
+    if (!(await flags.hasTable('ai_drift'))) throw new HttpError('Drift checks need a database update: node bin/hams-cli.js migrate', 404);
+    const drift = require('../ai/governance/driftCheck');
+    const latest = await drift.latest();
+    const models = [];
+    for (const row of latest) models.push({ ...row, label: (governance.CATALOG[row.model_name] || {}).label || row.model_name, history: await drift.history(row.model_name, 30) });
+    res.renderPage('settings/ai-drift', { active_tab: 'ai', models, bands: require('../ai/governance/drift').BANDS, job: (await schedulerService.status()).jobs.find(j => j.key === 'ai_drift') || null });
+  } catch (err) { next(err); }
+});
+
+// "This question was about …": a missed question taught its kind (the classifier learns it).
+router.post('/settings/ai/nl/teach', authRequired, csrfProtect, perm('settings.manage'), mod('settings'), async (req, res, next) => {
+  try {
+    try {
+      const r = await require('../ai/agents/assistant').teach(req.body.q, String(req.body.intent || ''), await currentUser(req));
+      req.flash('success', `Taught: "${String(req.body.q).slice(0, 80)}" is a "${r.now.replace('_', ' ')}" question (it was read as "${r.was.replace('_', ' ')}"). The classifier retrains on the next question.`);
+    } catch (err) {
+      if (!err.status || err.status >= 500) throw err;
+      req.flash('error', err.message);
+    }
+    res.redirect(hamsUrl('/settings/ai') + '#questions');
+  } catch (err) { next(err); }
+});
+
 // Kept for the M1 button and bookmarks.
 router.post('/settings/ai/snapshot/run', authRequired, csrfProtect, perm('settings.manage'), mod('settings'), (req, res) => {
   res.redirect(307, hamsUrl('/settings/ai/jobs/ai_snapshot/run'));
 });
 
 // ─── AI Approvals inbox ───
+// Filters from the query string, each checked (unknown values are ignored).
+function inboxFilters(q) {
+  const word = v => (/^[a-z][a-z0-9_.]{1,59}$/i.test(String(v || '')) ? String(v) : null);
+  const min = parseFloat(q.min);
+  return {
+    agent: word(q.agent), type: word(q.type), review: q.review === '1' ? '1' : null,
+    min: min >= 0 && min <= 1 ? min : null, location_id: /^\d{1,9}$/.test(String(q.location_id || '')) ? q.location_id : null,
+    q: q.q ? String(q.q).trim().slice(0, 100) : null,
+    sort: ['confidence', 'newest', 'oldest', 'least_sure'].includes(q.sort) ? q.sort : null
+  };
+}
+const inboxQuery = (view, filters) => {
+  const u = new URLSearchParams();
+  if (view === 'decided') u.set('view', 'decided');
+  for (const [k, v] of Object.entries(filters)) if (v !== null && v !== undefined && v !== '') u.set(k, v);
+  return u.toString();
+};
+
 router.get('/ai/approvals', authRequired, perm('ai.view'), mod('ai'), async (req, res, next) => {
   try {
     const user = await currentUser(req);
     const view = req.query.view === 'decided' ? 'decided' : 'pending';
     const page = Math.max(1, intOr(req.query.page, 1));
-    const result = await approvals.list(user, { view, page });
+    const filters = inboxFilters(req.query);
+    const result = await approvals.list(user, { view, page, filters });
+    const qs = inboxQuery(view, filters);
     res.renderPage('ai/approvals', {
-      view, rows: result.rows, total: result.total,
+      view, rows: result.rows, total: result.total, facets: result.facets, filters, qs,
       paginator: new Paginator(result.total, result.perPage, result.page),
-      baseUrl: hamsUrl('/ai/approvals') + (view === 'decided' ? '?view=decided' : ''),
-      canApprove: await authz.can('ai.approve', user)
+      baseUrl: hamsUrl('/ai/approvals') + (qs ? '?' + qs : ''),
+      canApprove: await authz.can('ai.approve', user),
+      agentsOn: await flags.isOn('agents')
     });
   } catch (err) { next(err); }
 });
 
+const decidedText = done => {
+  const summary = done.applied_result && done.applied_result.summary ? ` ${done.applied_result.summary}.` : '';
+  if (done.status === 'rejected') return 'Rejected. The AI will learn from this.';
+  return `${done.status === 'edited' ? 'Applied with the option you picked.' : 'Accepted and applied.'}${summary}`;
+};
+
 router.post('/ai/approvals/:id/decide', authRequired, csrfProtect, perm('ai.approve'), mod('ai'), async (req, res, next) => {
   try {
     try {
-      const done = await approvals.decide(intOr(req.params.id), String(req.body.decision || ''), await currentUser(req), req.body.note);
-      const summary = done.applied_result && done.applied_result.summary ? ` ${done.applied_result.summary}.` : '';
-      req.flash('success', done.status === 'accepted' ? `Accepted and applied.${summary}` : 'Rejected. The AI will learn from this.');
+      const done = await approvals.decide(intOr(req.params.id), String(req.body.decision || ''), await currentUser(req), req.body.note,
+        { choice: req.body.choice !== undefined ? String(req.body.choice).slice(0, 60) : null });
+      req.flash('success', decidedText(done));
     } catch (err) {
       if (!err.status || err.status >= 500) throw err;
       req.flash('error', err.message);
     }
-    res.redirect(hamsUrl('/ai/approvals'));
+    res.redirect(hamsUrl('/ai/approvals') + (req.body.back ? '?' + String(req.body.back).replace(/[^\w=&.%-]/g, '').slice(0, 300) : ''));
+  } catch (err) { next(err); }
+});
+
+// Bulk accept / reject: each recommendation is decided on its own (permission and scope per item).
+router.post('/ai/approvals/bulk', authRequired, csrfProtect, perm('ai.approve'), mod('ai'), async (req, res, next) => {
+  try {
+    const ids = [].concat(req.body.ids || []).map(v => intOr(v, 0)).filter(Boolean);
+    const decision = String(req.body.decision || '');
+    const back = hamsUrl('/ai/approvals') + (req.body.back ? '?' + String(req.body.back).replace(/[^\w=&.%-]/g, '').slice(0, 300) : '');
+    if (!ids.length) { req.flash('error', 'Tick at least one recommendation.'); return res.redirect(back); }
+    if (!['accept', 'reject'].includes(decision)) { req.flash('error', 'Choose accept or reject.'); return res.redirect(back); }
+    const results = await approvals.decideMany(ids, decision, await currentUser(req), req.body.note);
+    const ok = results.filter(r => r.ok).length;
+    const bad = results.filter(r => !r.ok);
+    if (ok) req.flash('success', `${decision === 'accept' ? 'Accepted' : 'Rejected'} ${ok} recommendation${ok === 1 ? '' : 's'}.`);
+    if (bad.length) req.flash('error', `${bad.length} not ${decision === 'accept' ? 'applied' : 'rejected'}: ${bad.slice(0, 3).map(b => `#${b.id} ${b.error}`).join(' · ')}${bad.length > 3 ? ' …' : ''}`);
+    res.redirect(back);
+  } catch (err) { next(err); }
+});
+
+// ─── Agents and the orchestrator (M7) ───
+const orchestrator = require('../ai/orchestrator');
+const runTrace = require('../ai/orchestrator/trace');
+const FLOW_LABELS = Object.fromEntries(Object.entries(orchestrator.FLOWS).map(([k, f]) => [k, f.label]));
+
+router.get('/ai/runs', authRequired, perm('ai.manage'), mod('ai'), capabilityPage('agents'), async (req, res, next) => {
+  try {
+    const user = await currentUser(req);
+    const flow = FLOW_LABELS[req.query.flow] ? req.query.flow : null;
+    const status = ['running', 'done', 'partial', 'failed'].includes(req.query.status) ? req.query.status : null;
+    const page = Math.max(1, intOr(req.query.page, 1));
+    const result = await runTrace.list(user, { flow, status, page });
+    const u = new URLSearchParams();
+    if (flow) u.set('flow', flow);
+    if (status) u.set('status', status);
+    res.renderPage('ai/runs', {
+      rows: result.rows, total: result.total, flow, status, FLOW_LABELS, stats: await runTrace.stats(),
+      briefing: await runTrace.latest('fleet.review'),
+      paginator: new Paginator(result.total, result.perPage, result.page),
+      baseUrl: hamsUrl('/ai/runs') + (u.toString() ? '?' + u.toString() : '')
+    });
+  } catch (err) { next(err); }
+});
+
+router.get('/ai/runs/:id', authRequired, perm('ai.manage'), mod('ai'), capabilityPage('agents'), async (req, res, next) => {
+  try {
+    const run = await runTrace.get(intOr(req.params.id, 0), await currentUser(req));
+    if (!run) throw new HttpError('Run not found (or outside your locations).', 404);
+    res.renderPage('ai/run', { run, FLOW_LABELS });
+  } catch (err) { next(err); }
+});
+
+// "Review now" on an asset page: the agents review it together; the run opens when done.
+router.post('/ai/assets/:id/review', authRequired, csrfProtect, perm('ai.view'), perm('assets.view'), mod('ai'), capabilityPage('agents'), async (req, res, next) => {
+  try {
+    const user = await currentUser(req);
+    const asset = await assetService.getAsset(intOr(req.params.id, 0), user);
+    if (asset === false) throw new HttpError('This asset is outside your locations.', 403);
+    if (!asset) throw new HttpError('Asset not found.', 404);
+    const r = await orchestrator.run('asset.review', { asset_id: asset.id }, { trigger: 'request', user });
+    req.flash(r.status === 'failed' ? 'error' : 'success', `Agents reviewed ${asset.asset_tag}: ${r.summary}`);
+    res.redirect(hamsUrl(await authz.can('ai.manage', user) ? `/ai/runs/${r.id}` : `/assets/${asset.id}`));
+  } catch (err) { next(err); }
+});
+
+// Asset page card: the agents' last review of the asset, its findings and open recommendations.
+router.get('/api/ai/assets/:id/agents', authRequired, perm('ai.view'), perm('assets.view'), mod('ai'), capability('agents'), async (req, res, next) => {
+  try {
+    const user = await currentUser(req);
+    const asset = await assetService.getAsset(intOr(req.params.id, 0), user);
+    if (!asset) return res.status(asset === false ? 403 : 404).json({ error: 'Not available' });
+    const last = await db.get(
+      `SELECT id, flow, status, summary, started_at, context->'findings' AS findings FROM ai_runs
+        WHERE target_type = 'asset' AND target_id = $1 AND status IN ('done', 'partial') ORDER BY id DESC LIMIT 1`, [asset.id]);
+    const recs = await db.query(
+      `SELECT id, title, needs_review FROM ai_recommendations
+        WHERE status = 'pending' AND target_type = 'asset' AND target_id = $1 AND agent = 'Orchestrator' ORDER BY id DESC LIMIT 5`, [asset.id]);
+    const canTrace = await authz.can('ai.manage', user);
+    const { formatDateTime } = require('../core/helpers');
+    res.json({
+      last: last ? { id: last.id, summary: last.summary, when: formatDateTime(last.started_at), url: canTrace ? hamsUrl(`/ai/runs/${last.id}`) : null } : null,
+      findings: last && Array.isArray(last.findings) ? last.findings.filter(f => f.target_id === asset.id || f.agent === 'IntakeAgent').slice(0, 6) : [],
+      recommendations: recs.map(r => ({ ...r, url: hamsUrl(`/ai/approvals?q=${encodeURIComponent(asset.asset_tag)}`) }))
+    });
+  } catch (err) { next(err); }
+});
+
+// Fleet review on request (Settings > AI).
+router.post('/ai/runs/briefing', authRequired, csrfProtect, perm('ai.manage'), mod('ai'), capabilityPage('agents'), async (req, res, next) => {
+  try {
+    const r = await orchestrator.run('fleet.review', {}, { trigger: 'manual', user: await currentUser(req) });
+    res.redirect(hamsUrl(`/ai/runs/${r.id}`));
   } catch (err) { next(err); }
 });
 
@@ -195,7 +390,8 @@ router.get('/api/ai/ask', authRequired, perm('assets.view'), mod('ai'), capabili
     const q = String(req.query.q || '').trim().slice(0, 200);
     if (q.length < 2) return res.json({ question: q, answer: '', chips: [] });
     const assistant = require('../ai/agents/assistant');
-    const a = await assistant.ask(q, user);
+    // Through the orchestrator (a traced run) while the agents are on; directly otherwise.
+    const a = await require('../ai/orchestrator').ask(q, user);
     if (a.fallback || a.low_confidence) await assistant.recordMiss(q, a, user).catch(() => {});
     res.json({ ...a, link: a.link ? hamsUrl(a.link) : null, items: (a.items || []).map(i => ({ ...i, url: hamsUrl('/assets/' + i.id) })) });
   } catch (err) { next(err); }

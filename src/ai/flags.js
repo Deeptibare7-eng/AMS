@@ -65,9 +65,27 @@ const CAPABILITIES = [
       + 'in stock at Mindspace", "who has HAMS-900101", "which laptops are due for refresh". It shows what it understood as filters you can '
       + 'remove, answers with a count and examples, and never builds SQL from your words or changes anything. Uses refresh risk, unusual '
       + 'assets and data health when those are on.'
+  },
+  {
+    key: 'agents', label: 'Agents working together', icon: 'workflow', requires: 'ai_runs',
+    description: 'When an asset is added or changed, a repair is logged, a licence changes or an import finishes, the AI agents review it '
+      + 'together (intake, data health, refresh risk, unusual assets, maintenance, compliance). Where they disagree, the more trusted and more '
+      + 'confident view wins, and close calls go to AI Approvals marked for a closer look. A daily briefing sums up the fleet. Every run is '
+      + 'traced on AI Runs. Agents only use the capabilities that are on, and they never change anything themselves.'
   }
 ];
 const BY_KEY = new Map(CAPABILITIES.map(c => [c.key, c]));
+
+// Capabilities that need a later migration (e.g. agents: ai_m7.sql). Cached for 30 s like installed().
+const tableCache = new Map();
+async function hasTable(name) {
+  const hit = tableCache.get(name);
+  if (hit && Date.now() - hit.at < 30000) return hit.value;
+  const row = await db.get(`SELECT to_regclass($1) IS NOT NULL AS ok`, ['public.' + name]);
+  tableCache.set(name, { at: Date.now(), value: !!(row && row.ok) });
+  return tableCache.get(name).value;
+}
+const requirementMet = cap => (cap.requires ? hasTable(cap.requires) : true);
 
 // Cached for 30 s so a migrate or rollback is noticed without a restart.
 let installedCache = { at: 0, value: false };
@@ -77,7 +95,7 @@ async function installed() {
   installedCache = { at: Date.now(), value: !!(row && row.ok) };
   return installedCache.value;
 }
-function resetCache() { installedCache = { at: 0, value: false }; }
+function resetCache() { installedCache = { at: 0, value: false }; tableCache.clear(); }
 
 async function aiModule() {
   return db.get(`SELECT id, name, label, is_active FROM modules WHERE name = 'ai'`);
@@ -93,12 +111,15 @@ async function switchOn(key) {
 
 async function isOn(key) {
   if (!BY_KEY.has(key)) return false;
-  return (await masterOn()) && switchOn(key);
+  return (await masterOn()) && (await requirementMet(BY_KEY.get(key))) && switchOn(key);
 }
 
 async function setFlag(key, on, user) {
   const cap = BY_KEY.get(key);
   if (!cap) throw new HttpError('Unknown AI capability.', 422);
+  if (on && !(await requirementMet(cap))) {
+    throw new HttpError(`"${cap.label}" needs a database update first: node bin/hams-cli.js migrate (it only adds new ai_* tables).`, 422);
+  }
   await settings.set('ai', key, on ? '1' : '0', user ? user.id : null);
   await audit.log(user ? user.id : null, 'AI_FLAG_CHANGED', `AI capability "${cap.label}" switched ${on ? 'on' : 'off'}.`);
 }
@@ -117,20 +138,22 @@ async function enabledSet() {
   const out = new Set();
   try {
     if (!(await masterOn())) return out;
-    for (const c of CAPABILITIES) if (await switchOn(c.key)) out.add(c.key);
+    for (const c of CAPABILITIES) if ((await switchOn(c.key)) && (await requirementMet(c))) out.add(c.key);
   } catch (_) { /* AI tables missing or DB hiccup: behave as all off */ }
   return out;
 }
 
-// For Settings > AI: each capability with its own switch and whether it is really on.
+// For Settings > AI: each capability with its own switch, whether it is really on, and whether it
+// still needs a database update.
 async function overview() {
   const master = await masterOn();
   const out = [];
   for (const c of CAPABILITIES) {
     const sw = await switchOn(c.key);
-    out.push({ ...c, switch: sw, effective: master && sw });
+    const ready = await requirementMet(c);
+    out.push({ ...c, switch: sw, needs_migration: !ready, effective: master && sw && ready });
   }
   return out;
 }
 
-module.exports = { CAPABILITIES, installed, resetCache, aiModule, masterOn, isOn, enabledSet, setFlag, setMaster, overview };
+module.exports = { CAPABILITIES, installed, resetCache, aiModule, masterOn, isOn, enabledSet, setFlag, setMaster, overview, hasTable };

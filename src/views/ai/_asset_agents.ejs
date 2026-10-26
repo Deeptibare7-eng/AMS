@@ -1,0 +1,49 @@
+<%# Agents on the asset page (included only while "Agents working together" is on and the user has
+    ai.view). Loads after the page: the agents' last review of this asset, what they found, what
+    waits in AI Approvals, and "Review now". Nothing is changed by reviewing. %>
+<div x-data="aiAssetAgents()" x-init="load()" class="bg-hams-card border border-white/5 rounded-3xl p-6">
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+    <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="workflow" class="w-4 h-4 text-blue-400"></i>Agents' review</h2>
+    <form method="POST" action="<%= hams_url('/ai/assets/' + asset.id + '/review') %>"><%- csrf_field %>
+      <button class="px-3 py-1.5 rounded-xl text-xs bg-white/5 hover:bg-white/10 text-slate-300 flex items-center gap-1.5"><i data-lucide="play" class="w-3.5 h-3.5"></i>Review now</button>
+    </form>
+  </div>
+  <p x-show="!loaded" class="text-sm text-slate-500">Loading…</p>
+  <p x-show="loaded && failed" x-cloak class="text-sm text-slate-500">Not available right now.</p>
+  <div x-show="loaded && !failed" x-cloak class="space-y-4 text-sm">
+    <p x-show="!d.last" class="text-slate-500">Not reviewed yet. The agents review an asset when it is added or changed, or when you click Review now.</p>
+    <template x-if="d.last">
+      <div class="text-slate-300">
+        <span x-text="d.last.summary"></span>
+        <span class="text-xs text-slate-500" x-text="' · ' + d.last.when"></span>
+        <a x-show="d.last.url" :href="d.last.url" class="text-xs text-blue-400 hover:text-blue-300 ml-1">How they decided →</a>
+      </div>
+    </template>
+    <ul x-show="d.findings && d.findings.length" class="space-y-1.5">
+      <template x-for="f in d.findings" :key="f.text">
+        <li class="flex gap-2 text-xs"><span class="px-1.5 py-0.5 rounded-md shrink-0" :class="f.severity === 'high' ? 'bg-rose-500/10 text-rose-400' : 'bg-amber-500/10 text-amber-400'" x-text="f.agent.replace('Agent', '')"></span><span class="text-slate-300" x-text="f.text"></span></li>
+      </template>
+    </ul>
+    <div x-show="d.recommendations && d.recommendations.length">
+      <div class="text-xs text-slate-500 mb-1.5">Waiting in AI Approvals</div>
+      <template x-for="r in d.recommendations" :key="r.id">
+        <a :href="r.url" class="block text-xs text-slate-300 hover:text-white"><span x-text="r.title"></span><span x-show="r.needs_review" class="ml-1.5 px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-400">closer look</span></a>
+      </template>
+    </div>
+  </div>
+</div>
+<script>
+function aiAssetAgents() {
+  return {
+    loaded: false, failed: false, d: {},
+    async load() {
+      try {
+        const res = await fetch('<%= hams_url('/api/ai/assets/' + asset.id + '/agents') %>', { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error();
+        this.d = await res.json();
+      } catch (_) { this.failed = true; }
+      this.loaded = true;
+    }
+  };
+}
+</script>

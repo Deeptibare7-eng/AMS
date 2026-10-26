@@ -1,33 +1,90 @@
-<div class="space-y-6">
+<div class="space-y-6" x-data="{ picked: [], all: false, toggleAll(ids) { this.all = !this.all; this.picked = this.all ? ids.slice() : []; } }">
   <div>
     <h1 class="font-heading text-2xl md:text-3xl font-bold text-white mb-1">AI Approvals</h1>
     <p class="text-sm text-slate-500">Recommendations from the in-house AI. Nothing changes until someone accepts. Accepting applies the change with the same rules as doing it by hand (location access, stock ledger, audit log); rejecting teaches the AI.</p>
   </div>
 
-  <div class="flex gap-2">
+  <div class="flex flex-wrap gap-2">
     <a href="<%= hams_url('/ai/approvals') %>" class="px-4 py-2 rounded-xl text-sm <%= view === 'pending' ? 'bg-blue-600/10 text-blue-400 font-medium' : 'text-slate-400 hover:bg-white/5' %>">Waiting<%= view === 'pending' ? ' (' + total + ')' : '' %></a>
     <a href="<%= hams_url('/ai/approvals?view=decided') %>" class="px-4 py-2 rounded-xl text-sm <%= view === 'decided' ? 'bg-blue-600/10 text-blue-400 font-medium' : 'text-slate-400 hover:bg-white/5' %>">Decided<%= view === 'decided' ? ' (' + total + ')' : '' %></a>
+    <% if (facets.review && view === 'pending') { %>
+    <a href="<%= hams_url('/ai/approvals?review=1') %>" class="px-4 py-2 rounded-xl text-sm <%= filters.review ? 'bg-amber-500/10 text-amber-400 font-medium' : 'text-amber-400/80 hover:bg-white/5' %>">Closer look (<%= facets.review %>)</a>
+    <% } %>
   </div>
+
+  <%# Filters: a GET form; every value is checked by the route. %>
+  <form method="GET" action="<%= hams_url('/ai/approvals') %>" class="bg-hams-card border border-white/5 rounded-3xl p-4 flex flex-wrap items-end gap-3 text-sm">
+    <% if (view === 'decided') { %><input type="hidden" name="view" value="decided"><% } %>
+    <% const sel = 'px-3 py-2 rounded-xl bg-hams-bg border border-white/10 text-slate-200 outline-none focus:border-blue-500 text-sm'; %>
+    <label class="flex flex-col gap-1 text-xs text-slate-500">Search
+      <input type="text" name="q" value="<%= filters.q || '' %>" placeholder="Asset tag, model, words in the title" class="<%= sel %> min-w-[14rem]"></label>
+    <label class="flex flex-col gap-1 text-xs text-slate-500">Agent
+      <select name="agent" class="<%= sel %>"><option value="">All agents</option>
+        <% for (const a of facets.agents) { %><option value="<%= a.value %>" <%= filters.agent === a.value ? 'selected' : '' %>><%= a.value %> (<%= a.n %>)</option><% } %>
+      </select></label>
+    <label class="flex flex-col gap-1 text-xs text-slate-500">Kind
+      <select name="type" class="<%= sel %>"><option value="">All kinds</option>
+        <% for (const t of facets.types) { %><option value="<%= t.value %>" <%= filters.type === t.value ? 'selected' : '' %>><%= t.label %> (<%= t.n %>)</option><% } %>
+      </select></label>
+    <label class="flex flex-col gap-1 text-xs text-slate-500">Confidence
+      <select name="min" class="<%= sel %>"><option value="">Any</option>
+        <% for (const m of [0.6, 0.8, 0.9]) { %><option value="<%= m %>" <%= filters.min === m ? 'selected' : '' %>><%= Math.round(m * 100) %>% or more</option><% } %>
+      </select></label>
+    <% if (facets.locations.length) { %>
+    <label class="flex flex-col gap-1 text-xs text-slate-500">Asset Location
+      <select name="location_id" class="<%= sel %> max-w-[14rem]"><option value="">All locations</option>
+        <% for (const l of facets.locations) { %><option value="<%= l.value %>" <%= String(filters.location_id) === String(l.value) ? 'selected' : '' %>><%= l.label %> (<%= l.n %>)</option><% } %>
+      </select></label>
+    <% } %>
+    <% if (view === 'pending') { %>
+    <label class="flex flex-col gap-1 text-xs text-slate-500">Order
+      <select name="sort" class="<%= sel %>">
+        <% for (const [k, l] of [['confidence', 'Most sure first'], ['least_sure', 'Least sure first'], ['newest', 'Newest first'], ['oldest', 'Oldest first']]) { %><option value="<%= k %>" <%= (filters.sort || 'confidence') === k ? 'selected' : '' %>><%= l %></option><% } %>
+      </select></label>
+    <label class="flex items-center gap-2 text-xs text-slate-400 pb-2"><input type="checkbox" name="review" value="1" <%= filters.review ? 'checked' : '' %> class="rounded">Closer look only</label>
+    <% } %>
+    <button class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm">Filter</button>
+    <% if (qs && qs !== 'view=decided') { %><a href="<%= hams_url('/ai/approvals' + (view === 'decided' ? '?view=decided' : '')) %>" class="px-3 py-2 text-xs text-slate-400 hover:text-white">Clear</a><% } %>
+  </form>
 
   <% if (!rows.length) { %>
   <div class="bg-hams-card border border-white/5 rounded-3xl p-10 text-center">
     <i data-lucide="inbox" class="w-8 h-8 text-slate-600 mx-auto mb-3"></i>
-    <p class="text-slate-400"><%= view === 'pending' ? 'Nothing waiting for a decision.' : 'No decisions yet.' %></p>
+    <p class="text-slate-400"><%= qs && qs !== 'view=decided' ? 'Nothing matches these filters.' : view === 'pending' ? 'Nothing waiting for a decision.' : 'No decisions yet.' %></p>
     <p class="text-xs text-slate-500 mt-1">Recommendations appear here when AI capabilities that make them are switched on (Settings &gt; AI).</p>
   </div>
   <% } %>
 
-  <% const STATUS = { accepted: 'emerald', rejected: 'slate', failed: 'rose', expired: 'slate', applying: 'amber' }; %>
-  <% for (const r of rows) { const conf = Number(r.confidence); const cc = conf >= 0.8 ? 'emerald' : conf >= 0.6 ? 'sky' : 'amber'; %>
-  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+  <% const pendingIds = rows.filter(r => r.status === 'pending').map(r => r.id); %>
+  <% if (view === 'pending' && canApprove && pendingIds.length) { %>
+  <%# Bulk: the checkboxes on the cards belong to this form (form="ai-bulk"), so the cards keep their own forms. %>
+  <form id="ai-bulk" method="POST" action="<%= hams_url('/ai/approvals/bulk') %>" class="bg-hams-card border border-white/5 rounded-3xl p-4 flex flex-wrap items-center gap-3 text-sm">
+    <%- csrf_field %><input type="hidden" name="back" value="<%= qs %>">
+    <label class="flex items-center gap-2 text-slate-300"><input type="checkbox" :checked="all" @change="toggleAll(<%= JSON.stringify(pendingIds) %>)" class="rounded">All on this page</label>
+    <span class="text-xs text-slate-500" x-text="picked.length + ' selected'"></span>
+    <input type="text" name="note" maxlength="1000" placeholder="Note for all (optional)" class="flex-1 min-w-[12rem] px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white outline-none focus:border-blue-500/50">
+    <button name="decision" value="accept" :disabled="!picked.length" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-sm font-medium">Accept selected</button>
+    <button name="decision" value="reject" :disabled="!picked.length" class="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-300 text-sm">Reject selected</button>
+    <span class="w-full text-[11px] text-slate-500">Each one is checked on its own: your permissions and locations apply, and one that can't be applied doesn't stop the others. Where agents disagree, accepting takes their top option.</span>
+  </form>
+  <% } %>
+
+  <% const STATUS = { accepted: 'emerald', edited: 'emerald', rejected: 'slate', failed: 'rose', expired: 'slate', applying: 'amber' }; %>
+  <% for (const r of rows) { const conf = Number(r.confidence); const cc = conf >= 0.8 ? 'emerald' : conf >= 0.6 ? 'sky' : 'amber'; const opts = (r.proposed && r.proposed._options) || []; %>
+  <div class="bg-hams-card border <%= r.needs_review && r.status === 'pending' ? 'border-amber-500/20' : 'border-white/5' %> rounded-3xl p-6">
     <div class="flex flex-wrap items-center gap-2 mb-3 text-xs">
+      <% if (r.status === 'pending' && canApprove && view === 'pending') { %><input type="checkbox" form="ai-bulk" name="ids" value="<%= r.id %>" x-model.number="picked" class="rounded" aria-label="Select"><% } %>
       <span class="px-2.5 py-1 rounded-lg bg-white/5 text-slate-300"><%= r.handler_label %></span>
       <span class="px-2.5 py-1 rounded-lg bg-<%= cc %>-500/10 text-<%= cc %>-400 font-semibold" title="How sure the AI is"><%= conf >= 0.995 ? '>99' : Math.round(conf * 100) %>% confidence</span>
-      <span class="text-slate-500"><%= formatDateTime(r.created_at) %><%= r.site ? ' · ' + r.site : '' %></span>
-      <% if (r.status !== 'pending') { %><span class="px-2.5 py-1 rounded-lg bg-<%= STATUS[r.status] || 'slate' %>-500/10 text-<%= STATUS[r.status] || 'slate' %>-400 font-semibold"><%= r.status %></span><% } %>
+      <% if (r.needs_review) { %><span class="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 font-semibold" title="The agents disagree or are unsure">Closer look</span><% } %>
+      <span class="text-slate-500"><%= r.agent %> · <%= formatDateTime(r.created_at) %><%= r.location_name ? ' · ' + r.location_name : '' %><%= r.site ? ' · ' + r.site : '' %></span>
+      <% if (r.status !== 'pending') { %><span class="px-2.5 py-1 rounded-lg bg-<%= STATUS[r.status] || 'slate' %>-500/10 text-<%= STATUS[r.status] || 'slate' %>-400 font-semibold"><%= r.status === 'edited' ? 'accepted (other option)' : r.status %></span><% } %>
     </div>
     <div class="font-semibold text-white mb-1"><%= r.title %></div>
-    <% if (r.target_type === 'asset' && r.target_id) { %><a href="<%= hams_url('/assets/' + r.target_id) %>" class="text-xs text-blue-400 hover:text-blue-300">Open asset →</a><% } %>
+    <div class="flex flex-wrap gap-3 text-xs">
+      <% if (r.target_type === 'asset' && r.target_id) { %><a href="<%= hams_url('/assets/' + r.target_id) %>" class="text-blue-400 hover:text-blue-300">Open asset →</a><% } %>
+      <% if (r.run_id && agentsOn) { %><a href="<%= hams_url('/ai/runs/' + r.run_id) %>" class="text-blue-400 hover:text-blue-300">How the agents decided →</a><% } %>
+    </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
       <div>
@@ -51,17 +108,31 @@
     </div>
 
     <% if (r.status === 'pending' && canApprove) { %>
-    <div class="flex flex-wrap items-center gap-2 mt-5 pt-5 border-t border-white/5">
-      <form method="POST" action="<%= hams_url('/ai/approvals/' + r.id + '/decide') %>" class="flex flex-wrap items-center gap-2 flex-1">
-        <%- csrf_field %>
+    <form method="POST" action="<%= hams_url('/ai/approvals/' + r.id + '/decide') %>" class="mt-5 pt-5 border-t border-white/5 space-y-3">
+      <%- csrf_field %><input type="hidden" name="back" value="<%= qs %>">
+      <% if (opts.length > 1) { %>
+      <fieldset class="text-sm">
+        <legend class="text-xs text-slate-500 mb-2">The agents put forward more than one option. Accept applies the one you pick:</legend>
+        <div class="flex flex-wrap gap-2">
+          <% for (const o of opts) { %>
+          <label class="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 text-slate-200 cursor-pointer">
+            <input type="radio" name="choice" value="<%= o.value %>" <%= String(o.value) === String(r.proposed._to_id) ? 'checked' : '' %>>
+            <span><%= o.label %></span><span class="text-xs text-slate-500"><%= Math.round(o.score * 100) %>% · <%= o.agents.join(', ') %></span>
+          </label>
+          <% } %>
+        </div>
+      </fieldset>
+      <% } %>
+      <div class="flex flex-wrap items-center gap-2">
         <input type="text" name="note" maxlength="1000" placeholder="Note (optional)" class="flex-1 min-w-[12rem] px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white outline-none focus:border-blue-500/50">
         <button name="decision" value="accept" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium">Accept</button>
         <button name="decision" value="reject" class="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 text-sm">Reject</button>
-      </form>
-    </div>
+      </div>
+    </form>
     <% } else if (r.status !== 'pending') { %>
     <div class="mt-5 pt-4 border-t border-white/5 text-xs text-slate-500">
       <%= r.decided_by_name ? 'By ' + r.decided_by_name : '' %><%= r.decided_at ? ' on ' + formatDateTime(r.decided_at) : '' %><%= r.decision_note ? ' · “' + r.decision_note + '”' : '' %>
+      <% if (r.applied_result && r.applied_result.summary) { %><div class="text-slate-400 mt-1"><%= r.applied_result.summary %></div><% } %>
       <% if (r.status === 'failed' && r.applied_result && r.applied_result.error) { %><div class="text-rose-400 mt-1">Could not apply: <%= r.applied_result.error %></div><% } %>
     </div>
     <% } %>

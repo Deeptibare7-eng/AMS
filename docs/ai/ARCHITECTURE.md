@@ -29,7 +29,10 @@ what exists now. Later milestones add the models, agents and orchestrator listed
 | `features/snapshots.js` | The snapshot job (see below). |
 | `features/liveEvents.js` | Records lifecycle events with their exact time when they happen in the app, and runs a change snapshot 30 s after an import. |
 | `governance/approvals.js` | The AI Approvals inbox: `registerHandler`, `propose`, `list`, `decide`. |
-| `governance/registry.js` | Model registry: `save`, `activate`, `rollback`, `loadActive`, `list`. |
+| `governance/registry.js` | Model registry: `save`, `activate`, `rollback`, `loadActive`, `list`; M8: pins (`pin`, `unpin`, `pinned`), `autoActivate` (training jobs: not while a version is pinned), `annotate`. |
+| `governance/models.js` (M8) | What can be done with each model (purpose, rollback or not and why, retrain, what to refresh after a version change); the Settings > AI > Models overview and actions. |
+| `governance/drift.js`, `driftSpecs.js`, `driftCheck.js` (M8) | PSI, KS, profiles and comparison (pure); the features measured per model and their loader (shared with training); the daily check (job `ai_drift`): store, audit, retrain. |
+| `governance/feedback.js` (M8) | The feedback loop in numbers for Settings > AI. |
 | `models/baseModel.js` | The contract every model implements. |
 | `models/naiveBayes.js`, `models/logisticRegression.js` | Multinomial Naive Bayes; softmax logistic regression (hashed TF-IDF, AdaGrad). Both with temperature calibration and explanations. |
 | `models/text/` | `tokenize.js` (normalising, words, character n-grams, asset features), `similarity.js` (Levenshtein, Damerau/OSA, Jaro, Jaro-Winkler), `minhash.js` (MinHash + LSH). |
@@ -43,11 +46,14 @@ what exists now. Later milestones add the models, agents and orchestrator listed
 | `models/holtWinters.js`, `models/knapsack.js` (M5) | Holt-Winters (damped trend, season form and weights by grid search, 80% band, rolling backtest vs simple rules); 0/1 knapsack (greedy + bucketed dynamic programme that never exceeds the budget). |
 | `cost/` (M5) | `forecast.js` (replacement need by quarter from refresh-risk scores × replacement cost per category; PO spend series; spend pace and backtest; money formatting; job ai_cost_forecast), `plan.js` (Refresh Planning: candidates, knapsack, totals, Excel rows, proposal + the sign-off-only approval handler `plan.refresh`). |
 | `compliance/rules.js` (M5) | Ten licence / software rules, run on request; dormant (and says so) without licence or software records. |
-| `eval/` | `metrics.js` (accuracy, P/R/F1, top-k, log loss, calibration), `intakeEval.js` (time split), `searchEval.js` (labelled queries generated from the register; old search vs smart search), `riskEval.js` (refresh risk vs baselines and the cross-section; anomalies on corrupted copies + top findings), `costEval.js` (need by quarter, spend backtest, plans at several budgets, compliance status), `run.js` (`hams-cli ai:eval`). |
+| `nl/` (M6) | `vocab.js` (categories, makers, model numbers, places with site codes, holders: read from the register, cached 10 min), `entities.js` (rules: dates, RAM, OS, holder, statuses, issues, dictionary matches, typos, change requests; masked text), `seed.js` (seed questions in placeholder form, versioned), `testset.js` (hand-written test questions), `intent.js` (`IntentClassifier`: Naive Bayes vs logistic regression by cross-validation, unknown-word penalty), `query.js` (slots → whitelisted Hardware filters + chips). |
+| `agents/` (M6, M7) | `agent.js` (what every agent declares: goal, tool whitelist, input/output, thresholds, escalation), `assistant.js` (AssistantAgent: understand, answer, gate, chips, misses); M7: `intake.js`, `dataQuality.js`, `maintenance.js`, `anomaly.js`, `lifecycleCost.js`, `compliance.js`, `report.js` (one agent per module, each with read-only tools over the services above), `index.js` (the list, for Settings). |
+| `orchestrator/` (M7) | `index.js` (event routing with debounce and a rate limit, `run(flow)`, the resolve step, `ask`), `flows.js` (the task graphs), `dag.js` (runner: dependencies, side-by-side steps, timeouts, retries), `blackboard.js` (shared context of a run), `resolve.js` (confidence-weighted conflict resolution), `weights.js` (agents' track records), `handlers.js` (`agents.set_field`, `agents.replace_instead`), `trace.js` (`ai_runs` / `ai_run_steps`). |
+| `eval/` | `metrics.js` (accuracy, P/R/F1, top-k, log loss, calibration), `intakeEval.js` (time split), `searchEval.js` (labelled queries generated from the register; old search vs smart search), `riskEval.js` (refresh risk vs baselines and the cross-section; anomalies on corrupted copies + top findings), `costEval.js` (need by quarter, spend backtest, plans at several budgets, compliance status), `nlEval.js` (intent and entity scores on the test set, SQL-safety fuzz), `agentsEval.js` (asset reviews and resolution on the real register, read-only), `run.js` (`hams-cli ai:eval`). |
 | `worker.js` | Runs training, the out-of-fold check, the search-index build, refresh-risk training and anomaly scoring in a worker thread. |
 | `adapters/languageProvider.js` | `LanguageProvider` interface + `TemplateProvider`. |
 
-Planned (not yet present): more models (M5–M6), `agents/` and `orchestrator/` (M7).
+All eight milestones are in place. Possible next steps: an LLM adapter behind `adapters/languageProvider.js` (off by default), drift on more models once they are kept between runs, and a depreciation policy for book-value forecasts (Phase 0, Q2).
 
 ## How it plugs into the existing app
 
@@ -58,7 +64,7 @@ Planned (not yet present): more models (M5–M6), `agents/` and `orchestrator/` 
 | Maintenance | `operationsService.createMaintenance / updateMaintenance` | `publish('maintenance.logged', { maintenance_id, asset_id, action })` |
 | Licences | `inventoryService` (create/update/delete), `inventoryWorkflowService` (assign/return) | `publish('license.changed', { license_id, action })` |
 | Scheduler | `schedulerService.register(job)`, optional `job.enabled()` | AI jobs use group `ai` (not shown on the Automations page; shown on Settings > AI). Saving the Automations page skips them. |
-| Routes | `src/app.js` → `src/routes/ai.js` | `/settings/ai` (needs `settings.manage`), `/ai/approvals` (needs `ai.view` + module `ai`); M3: `GET /api/ai/search?q=` (Ctrl+K, needs `assets.view`; 404 `{off:true}` while off), `GET /ai/search/open?id=&q=&r=` (records the opened result, redirects to the asset); M4: `GET /api/ai/assets/:id/risk`, `GET /api/ai/lifecycle/summary`, `GET /api/ai/anomalies` (all `assets.view`, scoped), `POST /ai/anomalies/review` (`ai.approve`, scoped; a label only); M5: `GET /api/ai/cost/forecast` (`assets.view`, scoped need), `GET /ai/planning` + `/ai/planning/export` (`assets.view` + `ai.view`, scoped), `POST /ai/planning/propose` (`ai.manage`), `GET /api/ai/compliance` (`licenses.view`, scoped) |
+| Routes | `src/app.js` → `src/routes/ai.js` | `/settings/ai` (needs `settings.manage`), `/ai/approvals` (needs `ai.view` + module `ai`); M3: `GET /api/ai/search?q=` (Ctrl+K, needs `assets.view`; 404 `{off:true}` while off), `GET /ai/search/open?id=&q=&r=` (records the opened result, redirects to the asset); M4: `GET /api/ai/assets/:id/risk`, `GET /api/ai/lifecycle/summary`, `GET /api/ai/anomalies` (all `assets.view`, scoped), `POST /ai/anomalies/review` (`ai.approve`, scoped; a label only); M5: `GET /api/ai/cost/forecast` (`assets.view`, scoped need), `GET /ai/planning` + `/ai/planning/export` (`assets.view` + `ai.view`, scoped), `POST /ai/planning/propose` (`ai.manage`), `GET /api/ai/compliance` (`licenses.view`, scoped); M6: `GET /api/ai/ask?q=` (`assets.view`, scoped answer; 404 `{off:true}` while off), `POST /ai/ask/miss` ("Not what I meant", CSRF); M7: `GET /ai/runs` + `/ai/runs/:id` (`ai.manage`, scoped traces), `POST /ai/runs/briefing` (`ai.manage`), `POST /ai/assets/:id/review` (`ai.view` + `assets.view`, scoped), `GET /api/ai/assets/:id/agents` (the asset card), `POST /ai/approvals/bulk` (`ai.approve`, each item checked); M8 (all `settings.manage`): `POST /settings/ai/models/:name/retrain`, `/rollback`, `/activate`, `/unpin`, `GET /settings/ai/drift`, `POST /settings/ai/nl/teach` |
 | UI | `views/settings/_sidebar.ejs`, `views/layouts/main.ejs` | "AI" settings link; "AI Approvals" sidebar link only while AI is on; "Data Health" link while Data health is on. |
 | View locals | `src/middleware/viewLocals.js` | `aiOn`: the set of capabilities that are on (empty while AI is off), for the optional cards. |
 | Cards in existing pages (M2) | `views/assets/create.ejs`, `views/assets/show.ejs`, `views/home.ejs` | One `include` each, only when the capability is on: intake suggestions on Register Asset, AI Insights on the asset page, Data health on the dashboard. They load their data after the page, so the page never waits on the AI. |
@@ -67,7 +73,12 @@ Planned (not yet present): more models (M5–M6), `agents/` and `orchestrator/` 
 | | `views/assets/index.ejs`, `views/layouts/main.ejs` | Wider placeholder, the "Smart search" banner and a match line per row (`ai/_search_banner`, `ai/_search_why`); asset results in the Ctrl+K palette (`ai/_palette_search`), only with the capability on and `assets.view`. |
 | Refresh risk + unusual assets (M4) | `views/assets/show.ejs`, `views/home.ejs`, `views/operations/alerts.ejs` | One `include` each, only with the capability on: the "Refresh risk & findings" card (`ai/_asset_risk`), the dashboard map (`ai/_dashboard_lifecycle`, needs `assets.view`) and the "Unusual assets" section on Alerts (`ai/_alerts_anomalies`, needs `assets.view`). They load their data after the page. |
 | Cost + compliance (M5) | `views/home.ejs`, `views/operations/alerts.ejs`, `views/layouts/main.ejs` | One `include` each, only with the capability on: the dashboard "Cost forecast" card (`ai/_dashboard_cost`), the "Licence compliance" section on Alerts (`ai/_alerts_compliance`, needs `licenses.view`), and a "Refresh Planning" sidebar link (`ai.view` + `assets.view`) to the new page `ai/planning`. |
-| CLI | `bin/hams-cli.js` | `ai.sql`, `ai_m2.sql` in the migrate list; `migrate:rollback <file>`; `ai:eval [cutoff|search|lifecycle|anomaly|cost]` (read-only measurement). |
+| Questions (M6) | `src/services/assetService.js` (`buildFilters`, `listOrder`) | New optional Hardware filters, each a parameter and ignored unless given: `near_site` / `near_location` (a place: Machine Name sites or Asset Locations), `holder`, `warranty_from/to`, `bought_from/to`, `ram_min/max` (from the RAM field), `os` (from the OEM OS field), `ai` (`refresh_high` / `unusual`, from `ai_predictions`), `dq` (an issue code, from `ai_dq_issues`), `sort` (oldest, newest, cost, risk). |
+| | `src/routes/assets.js` | `?ask=` redirects to what the question was understood as (a plain search while off). The new keys are validated with the others. `aiAsk.gate()` drops them while Questions is off, and drops an AI set while the capability that makes it is off. Passes `askBanner` (question + removable chips) and adds the question's filters to the sentence above the list. |
+| | `views/assets/index.ejs`, `views/layouts/main.ejs` | A Search / Ask switch on the Hardware box and the "You asked" banner (`ai/_ask_banner`); Ask mode in Ctrl+K (`ai/_palette_ask`; the search results step aside while asking). Hidden fields now keep multi-value filters. |
+| Agents (M7) | `views/assets/show.ejs`, `views/layouts/main.ejs` | One `include` (`ai/_asset_agents`: the last review, findings, open recommendations, Review now) and an "AI Runs" sidebar link (`ai.manage`), only with Agents working together on. |
+| | `src/ai/index.js` | The data-health scan after an import steps aside while the agents are on (their import review runs it). |
+| CLI | `bin/hams-cli.js` | `ai.sql`, `ai_m2.sql`, `ai_m7.sql` in the migrate list; `migrate:rollback <file>`; `ai:eval [cutoff|search|lifecycle|anomaly|cost|nl|agents]` (read-only measurement). |
 | Seed | `database/seed.sql` | AI permission grants for new databases. |
 | Bug fix (M2) | `src/services/assetService.js` `updateAsset` | Keeps the register fields (custom_fields_data) a form doesn't send. The Edit page and the REST API used to wipe them, and with them the stock site. |
 
@@ -89,6 +100,11 @@ Events on the bus: `asset.created`, `asset.updated`, `asset.status_changed`, `as
 | `ai_dq_runs` (M2, `ai_m2.sql`) | One row per data-health scan: fleet score, issue counts, by location, by module, catalog findings. Gives the trend. |
 | `ai_dq_issues` (M2) | The latest scan's issues: asset, code, severity, confidence, plain-language detail. Replaced on each scan. |
 | `ai_predictions` (M2) | The latest per-asset output by capability (`data_quality`: score 0–100, grade, top factors). |
+| `ai_runs` (M7, `ai_m7.sql`) | One row per orchestrator run: flow, trigger, target, location (for scoping), user, status (`running`/`done`/`partial`/`failed`), summary, the task graph (nodes, levels, agents left out) and the blackboard at the end (claims, findings, decisions; trimmed). Kept 30 days, longer while a recommendation from it is open. |
+| `ai_run_steps` (M7) | One row per step: node, agent, dependencies, status, attempts, the tools called (with time), output (trimmed), error, timing. |
+| `ai_recommendations.needs_review` (M7) | True when the agents disagreed or were unsure. |
+| `ai_drift` (M8, `ai_m8.sql`) | One row per drift check of a model: version, status, max PSI, per-feature PSI / KS / what moved, when the reference was taken, row counts, what was done (retrain started, pinned, reference recorded). |
+| settings `ai.pin_<model>` (M8) | The pinned version of a model, if any. |
 
 M3 adds no table. The search index lives in memory and is rebuilt from the register. Its settings and
 measured numbers go into `ai_models` (`search_bm25`). A Ctrl+K result that is opened is kept in
@@ -100,12 +116,14 @@ real labelled queries for measuring the ranking later.
 | Job | When | Capability |
 |---|---|---|
 | `ai_snapshot` | daily 01:30, and 30 s after an import | snapshots |
-| `ai_dq_scan` | daily 02:00, 90 s after an import, and the first time Data health is switched on | data_quality |
+| `ai_dq_scan` | daily 02:00, 90 s after an import (run by the agents' import review while they are on), and the first time Data health is switched on | data_quality |
 | `ai_train_intake` | Sundays 03:00, and the first time Intake or Data health is switched on (when no model exists) | intake or data_quality |
 | `ai_search_index` | daily 02:30, and the first time Smart search is switched on | search |
 | `ai_lifecycle` | daily 03:30 (scores; retrains when the active version is 7+ days old or on Run now), and the first time Refresh risk or Cost forecast is switched on | lifecycle or cost |
 | `ai_cost_forecast` | daily 04:30, and after the first scoring when Cost forecast is switched on | cost |
 | `ai_anomaly` | daily 04:00, and the first time Unusual assets is switched on | anomaly |
+| `ai_agents_review` | daily 05:00 (the briefing; also removes traces older than 30 days), and Run the briefing now | agents |
+| `ai_drift` | daily 05:30 (needs `ai_m8.sql`), and Check now | intake, data_quality, lifecycle or cost |
 
 "Run now" on Settings > AI runs the scan and the training in the background; the result appears on the page.
 
@@ -204,6 +222,91 @@ No new table, and nothing written outside `ai_*`. The methods and numbers are in
   users who see every location.
 - **Dormant:** while there are no licence or software records it returns `dormant` and the list of checks.
 
+## Questions in plain language (M6)
+
+No new table. It writes only the intent model (`ai_models`, name `nl_intent`) and the questions it couldn't
+answer well (`ai_feedback`, capability `nl`, target type `question`). The method and numbers are in
+MODELS.md §11.
+
+**The flow** (`agents/assistant.js`, `ask()`):
+1. Entities and masked text.
+2. Intent and confidence (`understand()`, pure: the evaluation runs exactly this).
+3. By intent:
+   - **change:** refused, with a link to the asset or page where a person does it;
+   - **navigate:** the page;
+   - **who:** the asset, within the user's locations;
+   - **cost:** the cost forecast;
+   - **unknown:** smart search, and the question is kept;
+   - **otherwise:** filters → `gate()` → count + five examples → a templated answer, the chips, a link to
+     the Hardware list, the confidence and why.
+
+**AssistantAgent** (`agents/agent.js` contract):
+- **Goal:** answer questions about the assets in plain language, within the asker's locations.
+- **Tools (whitelist, all read-only and existing services):**
+  - `count` (`assetService.count` with the location scope);
+  - `sample` (`assetService.page`);
+  - `asset` (`getAsset`, scoped);
+  - `cost` (the forecast);
+  - `search` (smart search).
+
+  Free text goes through smart search exactly as the Hardware list does it. A tool not on the list throws.
+- **Thresholds:** act at 50%; between 30% and 50% it answers but marks the answer unsure and keeps the
+  question; below 30% it lists what was named, or falls back to search.
+- **Escalation:** changes are never made here. The answer points to the page (or AI Approvals) where a
+  person makes them.
+
+**Model:** trained on the first question (about 0.1 s) and saved to the registry. It is loaded from there
+while the seed set's version (`SEED_VERSION`) is unchanged; a new seed version trains a new model version.
+
+**Misses:** fallbacks and unsure answers are recorded as `ignored`, "Not what I meant" as `rejected`.
+Settings > AI lists the latest 15 so they can be added to `nl/seed.js`.
+
+## Agents and the orchestrator (M7)
+
+The method and numbers are in MODELS.md §12. The capability "Agents working together" (`agents`) needs
+`ai_m7.sql`. Until it is applied, the capability shows "Needs database update" and can't be switched on.
+
+**Agents** (`agents/`, contract `agents/agent.js`):
+- One per module, each with a goal, a whitelist of read-only tools over the existing services and the AI
+  capabilities above, inputs and outputs, thresholds and escalation (Settings > AI lists them).
+- An agent works only while the capability it builds on is on. The others are left out of a run, and the
+  trace says why.
+- No agent can write. The only way anything changes is a person accepting in AI Approvals, through the
+  existing services.
+
+**Flows** (`orchestrator/flows.js`, run by `orchestrator.run(flow, input, { trigger, user })`):
+
+| Flow | Started by | Task graph |
+|---|---|---|
+| `asset.review` | `asset.created` / `asset.updated` / `asset.status_changed` (3 s after the asset's last change; at most 60 a minute), Review now | intake ∥ quality ∥ unusual ∥ risk → resolve |
+| `maintenance.review` | `maintenance.logged` | risk → risk_view ∥ repairs → resolve |
+| `licence.review` | `license.changed` | licences |
+| `import.review` | `import.applied` (90 s later) | quality_scan → (risk_scores → cost_forecast) ∥ unusual_scan → summaries → briefing |
+| `fleet.review` | job `ai_agents_review` (05:00), Run the briefing now | health ∥ risk ∥ cost ∥ unusual ∥ licences → briefing |
+| `ask` | Ask in Ctrl+K and on Hardware | assistant |
+
+- **Runner** (`dag.js`):
+  - A node runs when its dependencies are done; independent ones run side by side, up to 3.
+  - Per-step timeout (20 s; 15 min for scans) and one retry with back-off, except for errors marked not
+    retryable and for timeouts.
+  - A node whose dependency failed is skipped, unless it is marked to always run (the resolve and briefing
+    steps).
+- **The existing job runner:** the import review's scans go through `schedulerService.runNow` (the same lock,
+  status and Settings > AI row as their nightly jobs), so a scan already running is not run twice.
+- **Blackboard** (`blackboard.js`): named results (`risk`, `health`, `briefing`, …), claims, findings,
+  decisions, proposals. Stored with the run.
+- **Resolve step:**
+  - Weighs the claims (`resolve.js`, weights from `weights.js`) and proposes the outcomes in AI Approvals
+    (`handlers.js`): `agents.set_field` (category or maker, `assets.edit`, through
+    `assetService.updateAsset`) or `agents.replace_instead` (a sign-off that changes nothing).
+  - A field already covered by an open recommendation (for example a data-health group fix) is not proposed
+    again.
+- **Trace** (`trace.js`): every run and every step, including skipped and failed ones. Visible on AI Runs to
+  `ai.manage` users, within their locations (runs without a location only to users who see all of them).
+
+**Events:** the orchestrator subscribes through `events.on(..., 'agents', ...)`, so nothing reaches it while
+the capability is off. A handler only schedules work and never slows the action that fired the event.
+
 ## Snapshots
 
 - **Full run:** the first run in a calendar month writes every asset. **Change run:** any other run writes
@@ -240,6 +343,17 @@ approvals.registerHandler('dq.fix_category', {
   through `catalogService.update`). Keys starting with `_` in `proposed` are for the handler and are not shown.
 - `propose()` refuses a recommendation without at least one plain-language reason or with a confidence
   outside 0–1. It returns `null` while the capability is off.
+- M7 (`orchestrator/handlers.js`): `agents.set_field` (with `_options` when agents disagree; the approver may pick
+  one) and `agents.replace_instead` (sign-off only).
+- **Inbox** (`list(user, { view, page, filters })`):
+  - Filters: agent (its own recommendations and the orchestrator's it backed), kind, closer look
+    (`needs_review`), minimum confidence, Asset Location, text in the title, order.
+  - Facets with counts for the menus.
+- **Bulk:** `decideMany(ids, ...)` runs `decide` per item (permission, scope and "already decided" each
+  time). The page reports what was applied and what was refused.
+- **Picking another option:** `decide(..., { choice })` passes the choice to the handler. A choice other than
+  the proposed value is recorded as status and label `edited` (`AI_RECOMMENDATION_EDITED`), with the chosen
+  option's agents, and updates the agents' weights.
 - `decide(id, 'accept'|'reject', user, note)`:
   1. Checks `ai.approve` and scope.
   2. Claims the row (`pending` → `applying`), so it can't be applied twice.
@@ -250,6 +364,26 @@ approvals.registerHandler('dq.fix_category', {
   - Super admins see everything.
   - Staff with `assets.view` see their role's location scope (all locations when none is set).
   - Location SPOCs without `assets.view` see only their own sites.
+
+## Governance (M8)
+
+- **The registry:**
+  - Every model version keeps its parameters, test numbers and training details. Since M8 that includes the
+    profile of the data it learnt from.
+  - Training jobs activate a new version with `autoActivate`, only if it scores at least as well **and** no
+    version is pinned.
+  - A version activated or rolled back to by a person is pinned (`AI_MODEL_PINNED`) until they unpin it.
+- **Drift:** the job `ai_drift` runs after the night's jobs. MODELS.md §13 has the method.
+- **The feedback loop:**
+  - `approvals.propose` holds back a rejected change (same dedupe key and same change).
+  - The drift check retrains intake after 20 category decisions.
+  - `assistant.teach` adds taught questions to the classifier's training.
+  - The agents' weights follow decisions.
+- **Audit:**
+  - `AI_MODEL_ACTIVATED`, `AI_MODEL_ROLLED_BACK`, `AI_MODEL_PINNED` / `UNPINNED`, `AI_MODEL_KEPT_CANDIDATE`.
+  - `AI_RETRAIN_REQUESTED`, `AI_DRIFT_DETECTED`, `AI_NL_TAUGHT`.
+  - Together with the recommendation decisions, flag changes and anomaly reviews already logged: every AI
+    decision and every human override is in `activity_logs`.
 
 ## Model contract
 
@@ -266,13 +400,16 @@ Every model extends `models/baseModel.js`:
 |---|---|
 | `tests/smoke-pages.test.js` | 67 existing pages and redirects, plus Settings > AI, for a super admin with AI off, on, and on with every capability: same statuses as before the AI layer (recorded from the unmodified code); AI Approvals and Data Health only when on; cards, sidebar links and the Ctrl+K asset results only with their capability; a Hardware search in all three modes. |
 | `tests/ai-foundation.test.js` | Unit: template provider, model contract, feature SQL, event bus. DB: off by default (incl. no events captured), switch logic + audit, snapshot baseline/change/events, live events + no double recording, maintenance/licence hooks, approvals (scope, accept/reject/failed, duplicates, capability off, feedback, audit), registry versions/rollback, scheduled job. |
-| `tests/ai-migration.test.js` | On a throwaway database: migrate → rollback `ai_m2.sql` → rollback `ai.sql` → migrate. Each rollback removes exactly what its migration added. |
+| `tests/ai-migration.test.js` | On a throwaway database: migrate → rollback `ai_m8.sql` → `ai_m7.sql` → `ai_m2.sql` → `ai.sql` → migrate. Each rollback removes exactly what its migration added. |
 | `tests/ai-algorithms.test.js` | Edit distances, Jaro/Jaro-Winkler (published values), MinHash/LSH, tokeniser, metrics, Naive Bayes (hand-computed probabilities), logistic regression, temperature scaling. |
 | `tests/ai-quality.test.js` | FAMS/host-name parsing, spelling variants (and non-variants), rules and score on a small register, cost outliers, catalog matcher + Platt, intake classifier. |
 | `tests/ai-m2.test.js` | Off by default; training + registry; suggestions and defaults; duplicate warnings; scan issues and proposals; asset/dashboard/Data Health pages; accepting fixes through the real services (incl. permission refusal and kept register fields); expiry of stale fixes; switching off. |
 | `tests/asset-edit.test.js` | Regression for the Edit-form bug: register fields and stock site survive an edit. |
 | `tests/ai-cost.test.js` | Unit: Holt-Winters finds a seasonal pattern and beats the simple rules on it, and calls waves not forecastable; knapsack beats greedy where it should and never exceeds the budget (300 random cases); the need adds up; money formatting. DB: off = no card / page / section; forecast with Cost on and Refresh risk off; scoped need; Refresh Planning (budget, scope, stock option, Excel, proposing needs `ai.manage`, duplicate refused, sign-off changes no asset, audit); cost job and registry; compliance dormant, then all 10 rules on synthetic licences, scoped; Settings; switching off. |
 | `tests/ai-risk.test.js` | Unit: cloglog derivatives; a known Weibull shape, scale and effect recovered from current-status data; piecewise shape vs one shape on a refresh step; sign constraint; probability metrics; Isolation Forest constant and planted outliers; the detector's reasons and no false flags on an ordinary fleet; what isn't scored. DB: off = no card/map/section and 404s; training, registry, weekly retrain rule; asset card; dashboard map and its scope; Alerts list, scope, review (label + audit, asset untouched, hidden while unchanged, permission); Settings > AI; switching off. |
+| `tests/ai-governance.test.js` | Unit: PSI and KS on known values; profiles (same data stable, shifted significant, new categories named, worst first); the "same change" comparison; the model catalog. DB: rollback, pins, activate, unpin, permissions and audit through Settings; retraining while pinned keeps a candidate; Retrain now; drift stable → significant → retrain → stable again; pinned → not retrained; reference taken for an older version; 20 decisions → retrain; rejected recommendations held back unless changed; feedback numbers (acceptance, real-click MRR, unusual-asset precision, overrides); teaching the question classifier; the drift report and its permissions; checks off with their capabilities. |
+| `tests/ai-agents.test.js` | Unit: task graph (order, side-by-side steps, retries, not retrying, timeouts, skipped dependents, always, cycles), blackboard, conflict resolution (agree, alone, weak, disagree, confirm, strong dissent, weights), weights, every agent's contract and tool whitelist, agent logic with stubbed tools (intake, repairs, risk, briefing). DB: off by default; asset reviews (agree → recommend, disagree → closer look with options, confirm → nothing, covered → skipped), task graph and omitted agents in the trace; events (debounce, rate limit, the real update hook); retries and partial runs; inbox filters, facets, scope, picking another option (edited, weights), bulk; repair-or-replace sign-off; licence check; questions traced; daily briefing through the job runner and pruning; import review through the job runner; trace pages, Review now, the asset card, permissions; switching off. |
+| `tests/ai-nl.test.js` | Unit (fake vocabulary, fixed today): questions → filters (dates, RAM, OS, holder, L&T, typos, issues, future retirement, missing data); change requests refused, lone tags, unknown; the test set (intent and entities) and the model contract; SQL-safety fuzz; the agent tool whitelist. DB: off = no Ask, `?ask=` is a plain search, question filters ignored; on = count / find / who / how-to answers with why and confidence; change refused and nothing changed; fallback kept; injection harmless; Hardware redirect, banner and removable chips; every new filter, bad values ignored, AI sets gated; location scope; Ctrl+K include, "Not what I meant", Settings misses; model saved once; switching off. |
 | `tests/ai-search.test.js` | Unit: analyzer, bounded edit distance, index (identifiers, typos, synonyms, completion, AND, fallback, dropped words, literal match), explanations, live changes, evaluation, saved settings, the eval generator. DB: off = old search; on = ranked list, banner, why, filters kept, export = list; Ctrl+K hits within the user's locations; click labels; changes reach the index without a rebuild; nightly job versions; switching off. |
 
 Database tests use `it_hams_test` (created by `npm run test:db`, schema + seed only). The helper refuses any

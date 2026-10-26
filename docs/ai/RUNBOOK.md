@@ -8,7 +8,8 @@ For admins running the app. Background: [ARCHITECTURE.md](ARCHITECTURE.md).
 node bin/hams-cli.js migrate
 ```
 
-`ai.sql` (M1) and `ai_m2.sql` (M2) add only new `ai_*` tables, an `ai` module (switched off) and three
+`ai.sql` (M1), `ai_m2.sql` (M2), `ai_m7.sql` (M7: run traces, one column on an AI table) and `ai_m8.sql` (M8: drift
+checks) add only new `ai_*` tables, an `ai` module (switched off) and three
 permissions (`ai.view`, `ai.approve`, `ai.manage`). No existing table or row changes. **Take a backup
 first** (Settings > Backup & Restore) on a database with real data. Until this has run, Settings > AI says
 "AI tables are not installed" and nothing AI-related runs.
@@ -18,11 +19,15 @@ first** (Settings > Backup & Restore) on a database with real data. Until this h
 Roll back the newest migration first:
 
 ```bash
+node bin/hams-cli.js migrate:rollback ai_m8.sql   # drift checks and model pins
+node bin/hams-cli.js migrate:rollback ai_m7.sql   # run traces, the agents' switch
 node bin/hams-cli.js migrate:rollback ai_m2.sql   # data-health tables
 node bin/hams-cli.js migrate:rollback ai.sql      # everything else AI
 ```
 
 Each runs its `database/<name>.down.sql` in one transaction and deletes its `migrations` row.
+- `ai_m8.sql` drops the drift checks and removes the model pins.
+- `ai_m7.sql` drops the run traces and the `needs_review` column, and removes the agents' switch.
 - `ai_m2.sql` drops the data-health runs, issues and per-asset scores.
 - `ai.sql` drops the snapshots, events, recommendations, feedback and models, and removes the module,
   permissions, grants and AI settings.
@@ -214,12 +219,92 @@ Every switch change is written to the audit log (`AI_FLAG_CHANGED`, `AI_MASTER_S
   checking on its own once licences are added or software is imported.
 - **Nothing is changed.** Each finding links to the licence's history page.
 
-## Models
+## Questions in plain language
 
-- **Where:** Settings > AI > Models lists every trained version (status, when, and its test numbers: held-out
-  accuracy and macro-F1 for the intake model, MRR@10 and time to rank for smart search).
-- **Rolling back** a model version (registry `rollback`) has no button yet; M8 adds activate and rollback
-  buttons.
+- **Switch on:** Settings > AI > "Questions in plain language".
+- **Where:**
+  - **Ctrl+K:** click **Ask**, type a question, press Enter. You get the answer, the filters it understood,
+    a few examples, how sure it is and why. Enter again opens the list.
+  - **Hardware:** switch the search box to **Ask**. The list opens with "You asked …" and the filters as
+    chips; × removes one.
+- **Examples:**
+  - "laptops in Pune with warranty expiring next month"
+  - "how many desktops are in stock at Mindspace"
+  - "who has HAMS-900101"
+  - "which laptops are due for refresh"
+  - "assets with no FAMS barcode"
+  - "how do I import assets"
+- **It only finds and explains.** "Retire HAMS-…" or "assign … to …" is refused with a link to where a
+  person does it.
+- **Uses other capabilities when they are on:** refresh risk (or cost forecast) for "due for refresh",
+  unusual assets, data health for issues, smart search for leftover words. Without them it says so and
+  shows a plain list.
+- **Teaching it:**
+  - Questions it fell back to search on, was unsure about, or that someone marked "Not what I meant" are
+    listed under Settings > AI.
+  - Add good ones to `src/ai/nl/seed.js` (in placeholder form, e.g. "how many CAT are in PLACE") and raise
+    `SEED_VERSION`. The next question trains and saves a new model version.
+- **Measured on this database** (read-only): `node bin/hams-cli.js ai:eval nl`.
+
+## Agents working together
+
+- **Database update first:** `node bin/hams-cli.js migrate` applies `ai_m7.sql` (two new `ai_*` tables and
+  one column on `ai_recommendations`). Undo: `node bin/hams-cli.js migrate:rollback ai_m7.sql`.
+- **Switch on:** Settings > AI > "Agents working together". The agents use only the capabilities that are on
+  (for example, IntakeAgent needs Intake suggestions).
+- **What happens:**
+  - When an asset is added or changed, a repair is logged, a licence changes or an import finishes, the
+    agents review it together.
+  - Where they agree, a recommendation goes to AI Approvals. Where they disagree or are unsure, it goes there
+    marked **Closer look**, with the options; pick one and accept.
+  - Each morning (05:00) ReportAgent writes the briefing (AI Runs, Settings > AI).
+- **AI Runs** (sidebar, needs `ai.manage`): every run with its task graph, each agent's tools and output, how
+  disagreements were settled, and what went to AI Approvals.
+- **On an asset page:** "Agents' review" shows the last review and **Review now**.
+- **AI Approvals:**
+  - Filter by agent, kind, Closer look, confidence, location or text.
+  - Tick several and **Accept selected** / **Reject selected**. Each one is still checked against your
+    permissions and locations.
+- **Measured on this database** (read-only): `node bin/hams-cli.js ai:eval agents`.
+
+## Models: retrain, roll back, pin
+
+- **Where:** Settings > AI > Models. Each model shows what it is for, its last versions with their test
+  numbers, and what you can do with it.
+- **Retrain now:** starts the model's training or rebuild in the background (`AI_RETRAIN_REQUESTED`).
+  - Intake and refresh risk keep the new version only if it scores at least as well on held-out data.
+  - The question classifier retrains only if questions were taught since.
+- **Roll back** / **Activate** (intake and refresh risk only):
+  - Makes that version the active one and **pins** it. Scheduled retraining and drift then keep new versions
+    as candidates until you click **Unpin**.
+  - After a refresh-risk change, every asset is re-scored with the chosen version in the background.
+  - Unusual assets, smart search and spend pace are rebuilt from the data on every run, so they have no rollback.
+- **Every action is audited** (Settings > Audit Trails: `AI_MODEL_*`).
+
+## Drift
+
+- **Needs:** `ai_m8.sql` (`node bin/hams-cli.js migrate`).
+- **When:** daily at 05:30 while Intake, Data health, Refresh risk or Cost forecast is on. **Check now** is on
+  the drift report (Settings > AI > Drift report).
+- **What it shows:** per model and feature, the PSI (under 0.1 stable, 0.1–0.25 moderate, over 0.25
+  significant), the KS test for numbers, what moved ("Laptop 63% → 98%"), and the history.
+- **On significant drift:** the model retrains in the background, unless pinned or already retrained for drift
+  in the last 7 days. If drift stays after a retrain, look at the data: an import may have changed a field's
+  meaning.
+- **The first check of an older version** records its reference ("taken at the first drift check"), and drift
+  is measured from then on.
+- **Measured on this database** (read-only, old vs new purchases): `node bin/hams-cli.js ai:eval drift`.
+
+## Teaching the AI
+
+- **AI Approvals:**
+  - Accepting applies the change.
+  - Rejecting holds the same recommendation back from then on. It returns only if it changes, and says so.
+  - Picking another option where agents disagree adjusts the agents' trust.
+- **Unusual assets:** "Real issue" / "Expected" on Alerts.
+- **Questions:** on Settings > AI, each question the assistant didn't answer well has **Teach**: pick the kind of
+  question it was. The classifier learns it on the next question.
+- **Settings > AI > Feedback** shows how this adds up.
 - **To measure the AI on the current data** (read-only, prints a report):
 
   ```bash

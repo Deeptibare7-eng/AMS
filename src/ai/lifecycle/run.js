@@ -30,24 +30,30 @@ async function train({ trigger = 'schedule', user = null, rows = null } = {}) {
   const { params, metrics } = await worker.run('trainLifecycle', { rows, now: Date.now() });
   if (!Object.keys(params.strata).length) return { skipped: true, summary: 'Not trained: no category has 50+ retirements and 200+ assets yet.' };
   const model = WeibullRisk.fromJSON(params);
+  // What the data looked like, for the daily drift check (the same rows the model learned from).
+  const spec = require('../governance/driftSpecs').SPECS[WeibullRisk.modelName];
+  const profile = require('../governance/drift').profile(rows.filter(r => !r.deleted), spec.spec);
   const version = await registry.save(model, {
     metrics: { brier: metrics.brier, auc: metrics.auc, ece: metrics.ece, weibull_one_shape_brier: metrics.weibull_one_shape_brier },
     userId: user ? user.id : null,
-    training: { trigger, validation: '20% of assets held out (by id), current status', strata: metrics.strata, test_assets: metrics.test_assets, ms: Date.now() - t0 }
+    training: { trigger, validation: '20% of assets held out (by id), current status', strata: metrics.strata, test_assets: metrics.test_assets, profile, ms: Date.now() - t0 }
   });
   const active = (await registry.list(WeibullRisk.modelName)).find(r => r.status === 'active');
   const ok = !active || !active.metrics || metrics.brier <= active.metrics.brier + 0.005;
-  if (ok) await registry.activate(WeibullRisk.modelName, version, user);
+  // A version pinned by a person stays active; the new one is kept as a candidate.
+  const activated = ok && await registry.autoActivate(WeibullRisk.modelName, version, user);
   invalidate();
-  return { version, activated: ok, metrics };
+  return { version, activated, metrics };
 }
 
-async function run({ trigger = 'schedule', user = null } = {}) {
+// retrain: false only scores with the active version (after a version was chosen by hand).
+async function run({ trigger = 'schedule', user = null, retrain = null } = {}) {
   const t0 = Date.now();
   const rows = await db.tx(async t => { await t.run('SET TRANSACTION READ ONLY'); return assetRows.load(t); });
   const last = (await registry.list(WeibullRisk.modelName)).find(r => r.status === 'active');
   let trained = null;
-  if (!last || trigger === 'manual' || Date.now() - new Date(last.trained_at).getTime() > RETRAIN_DAYS * 864e5) {
+  if (!last && retrain === false) return { skipped: true, summary: 'No active refresh-risk version to score with.' };
+  if (retrain !== false && (!last || trigger === 'manual' || Date.now() - new Date(last.trained_at).getTime() > RETRAIN_DAYS * 864e5)) {
     trained = await train({ trigger, user, rows });
     if (trained.skipped) return trained;
   }

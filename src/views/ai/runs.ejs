@@ -1,0 +1,65 @@
+<div class="space-y-6">
+  <div>
+    <h1 class="font-heading text-2xl md:text-3xl font-bold text-white mb-1">AI Runs</h1>
+    <p class="text-sm text-slate-500">Every time the agents work together: what started it, which agents took part and in what order, what each found, how disagreements were settled and what went to AI Approvals. Kept for 30 days.</p>
+  </div>
+
+  <% if (briefing && briefing.context && briefing.context.entries && briefing.context.entries.briefing) { const b = briefing.context.entries.briefing.value; %>
+  <div class="bg-hams-card border border-white/5 rounded-3xl p-6">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <h2 class="font-heading font-semibold text-white flex items-center gap-2"><i data-lucide="newspaper" class="w-4 h-4 text-blue-400"></i>Today's briefing</h2>
+      <span class="text-xs text-slate-500">ReportAgent · <a href="<%= hams_url('/ai/runs/' + briefing.id) %>" class="text-blue-400 hover:text-blue-300"><%= formatDateTime(briefing.started_at) %></a></span>
+    </div>
+    <ul class="space-y-1.5 text-sm text-slate-300">
+      <% for (const l of (b.lines || [])) { %><li class="flex gap-2"><span class="text-slate-600">•</span><span><%= l.text %><% if (l.link) { %> <a href="<%= hams_url(l.link) %>" class="text-blue-400 hover:text-blue-300 text-xs">→</a><% } %></span></li><% } %>
+    </ul>
+  </div>
+  <% } %>
+
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+    <div class="bg-hams-card border border-white/5 rounded-3xl p-5"><div class="text-xs text-slate-500">Runs today</div><div class="text-2xl font-bold text-white"><%= stats.runs_today %></div></div>
+    <div class="bg-hams-card border border-white/5 rounded-3xl p-5"><div class="text-xs text-slate-500">Failed today</div><div class="text-2xl font-bold <%= stats.failed_today ? 'text-rose-400' : 'text-white' %>"><%= stats.failed_today %></div></div>
+    <div class="bg-hams-card border border-white/5 rounded-3xl p-5 col-span-2 md:col-span-1"><div class="text-xs text-slate-500">Last run</div><div class="text-white"><%= stats.last ? (FLOW_LABELS[stats.last.flow] || stats.last.flow) + ' · ' + formatDateTime(stats.last.started_at) : 'None yet' %></div></div>
+  </div>
+
+  <form method="GET" action="<%= hams_url('/ai/runs') %>" class="flex flex-wrap items-end gap-3 text-sm">
+    <% const sel = 'px-3 py-2 rounded-xl bg-hams-card border border-white/10 text-slate-200 outline-none focus:border-blue-500 text-sm'; %>
+    <select name="flow" class="<%= sel %>"><option value="">All flows</option>
+      <% for (const [k, l] of Object.entries(FLOW_LABELS)) { %><option value="<%= k %>" <%= flow === k ? 'selected' : '' %>><%= l %></option><% } %>
+    </select>
+    <select name="status" class="<%= sel %>"><option value="">Any status</option>
+      <% for (const s of ['done', 'partial', 'failed', 'running']) { %><option value="<%= s %>" <%= status === s ? 'selected' : '' %>><%= s %></option><% } %>
+    </select>
+    <button class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white">Filter</button>
+  </form>
+
+  <div class="bg-hams-card border border-white/5 rounded-3xl overflow-hidden">
+    <% if (!rows.length) { %>
+    <p class="p-8 text-center text-sm text-slate-500">No runs yet. They start when assets are added or changed, repairs are logged, licences change or imports finish, and each morning for the briefing.</p>
+    <% } else { %>
+    <div class="table-responsive">
+      <table class="w-full min-w-[820px] text-sm">
+        <thead><tr class="text-left text-xs text-slate-500 uppercase border-b border-white/5">
+          <th class="px-6 py-3">Run</th><th class="px-6 py-3">Flow</th><th class="px-6 py-3">Started by</th><th class="px-6 py-3">Result</th><th class="px-6 py-3 text-right">Steps</th><th class="px-6 py-3 text-right">Took</th>
+        </tr></thead>
+        <tbody class="divide-y divide-white/5">
+          <% const SC = { done: 'emerald', partial: 'amber', failed: 'rose', running: 'sky' }; %>
+          <% for (const r of rows) { %>
+          <tr class="hover:bg-white/[0.02]">
+            <td class="px-6 py-3 whitespace-nowrap"><a href="<%= hams_url('/ai/runs/' + r.id) %>" class="text-blue-400 hover:text-blue-300">#<%= r.id %></a><div class="text-xs text-slate-500"><%= formatDateTime(r.started_at) %></div></td>
+            <td class="px-6 py-3"><div class="text-white"><%= FLOW_LABELS[r.flow] || r.flow %></div><% if (r.asset_tag) { %><div class="text-xs text-slate-500 font-mono"><%= r.asset_tag %></div><% } %></td>
+            <td class="px-6 py-3 text-xs text-slate-400"><%= r.trigger.replace(/\./g, ' ') %><%= r.user_name ? ' · ' + r.user_name : '' %></td>
+            <td class="px-6 py-3"><span class="px-2 py-0.5 rounded-md text-xs bg-<%= SC[r.status] || 'slate' %>-500/10 text-<%= SC[r.status] || 'slate' %>-400"><%= r.status %></span>
+              <div class="text-xs text-slate-400 mt-1 max-w-md truncate" title="<%= r.summary %>"><%= r.summary %></div>
+              <% if (r.recommendations) { %><div class="text-xs text-amber-400/80"><%= r.recommendations %> recommendation<%= r.recommendations === 1 ? '' : 's' %></div><% } %></td>
+            <td class="px-6 py-3 text-right text-slate-400"><%= r.steps %></td>
+            <td class="px-6 py-3 text-right text-slate-400 whitespace-nowrap"><%= r.duration_ms === null ? '…' : r.duration_ms < 1000 ? r.duration_ms + ' ms' : (r.duration_ms / 1000).toFixed(1) + ' s' %></td>
+          </tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+    <% } %>
+  </div>
+  <% if (paginator.hasPages()) { %><div class="bg-hams-card border border-white/5 rounded-3xl"><%- await include('../components/pagination', { paginator, baseUrl }) %></div><% } %>
+</div>

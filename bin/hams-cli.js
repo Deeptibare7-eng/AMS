@@ -18,7 +18,7 @@ async function ensureMigrationsTable() {
 async function migrate() {
   await ensureMigrationsTable();
   const dir = path.join(config.rootDir, 'database');
-  const files = ['schema.sql', 'heartbeat.sql', 'agents.sql', 'software.sql', 'new_joinees.sql', 'software_allocation.sql', 'software_prices.sql', 'performance_indexes.sql', 'security_hardening.sql', 'joinee_notifications.sql', 'optional_user_email.sql', 'location_spocs.sql', 'site_spoc_contacts.sql', 'ai.sql', 'ai_m2.sql'];
+  const files = ['schema.sql', 'heartbeat.sql', 'agents.sql', 'software.sql', 'new_joinees.sql', 'software_allocation.sql', 'software_prices.sql', 'performance_indexes.sql', 'security_hardening.sql', 'joinee_notifications.sql', 'optional_user_email.sql', 'location_spocs.sql', 'site_spoc_contacts.sql', 'ai.sql', 'ai_m2.sql', 'ai_m7.sql', 'ai_m8.sql'];
   const applied = (await db.query('SELECT migration FROM migrations')).map(r => r.migration);
   const batchRow = await db.get('SELECT COALESCE(MAX(batch), 0) + 1 AS b FROM migrations');
   const batch = batchRow.b;
@@ -177,7 +177,7 @@ Commands:
   joinees:recommend       Generate New Joinee allocation recommendations
   insights:refresh        Recompute laptop quality grades and current locations
   ai:eval [cutoff|part]   Measure the AI on this database (read-only; time split at cutoff, default 2024-01-01;
-                          part = search, lifecycle, anomaly, cost or nl for that part only)
+                          part = search, lifecycle, anomaly, cost, nl, agents or drift for that part only)
   tokens:prune            Delete expired API tokens`);
     }
     process.exit(0);

@@ -62,6 +62,30 @@ const JOBS = [
     schedule: { type: 'daily', time: '04:30' },
     enabled: () => flags.isOn('cost'),
     run: async ctx => (await require('./cost/forecast').run({ trigger: ctx && ctx.manual ? 'manual' : 'schedule', user: ctx && ctx.user })).summary
+  },
+  {
+    key: 'ai_agents_review', label: 'Agents: daily briefing', group: 'ai', defaultEnabled: false,
+    description: 'After the night\'s scans, the agents sum up the fleet side by side (data health, refresh risk, cost, unusual assets, licences, AI Approvals) and ReportAgent writes the briefing. Also removes run traces older than 30 days.',
+    schedule: { type: 'daily', time: '05:00' },
+    enabled: () => flags.isOn('agents'),
+    run: async ctx => {
+      const orchestrator = require('./orchestrator');
+      const r = await orchestrator.run('fleet.review', {}, { trigger: ctx && ctx.manual ? 'manual' : 'schedule', user: ctx && ctx.user });
+      const pruned = await require('./orchestrator/trace').prune();
+      return `${r ? `Run #${r.id} (${r.status})` : 'Agents are off'}${pruned ? `; ${pruned} old trace(s) removed` : ''}`;
+    }
+  },
+  {
+    key: 'ai_drift', label: 'Drift check', group: 'ai', defaultEnabled: false,
+    description: 'Compares today\'s register with the data the intake and refresh-risk models were trained on (PSI per feature, KS test for numbers). Significant drift, or 20+ category decisions since training, starts a retrain unless the version is pinned.',
+    schedule: { type: 'daily', time: '05:30' },
+    // Needs ai_m8.sql (its table) and a capability whose model is checked.
+    enabled: async () => {
+      if (!(await flags.hasTable('ai_drift'))) return false;
+      const on = await flags.enabledSet();
+      return ['intake', 'data_quality', 'lifecycle', 'cost'].some(k => on.has(k));
+    },
+    run: async ctx => (await require('./governance/driftCheck').run({ user: ctx && ctx.user })).summary
   }
 ];
 
@@ -105,8 +129,12 @@ function start() {
   require('./search/service').start();
   require('./quality/fixes'); // registers the AI Approvals handlers
   require('./cost/plan'); // the refresh-plan sign-off handler
-  // A data-health scan shortly after imports (after the snapshot, which runs 30 s after).
+  require('./orchestrator/handlers'); // the agents' recommendation handlers
+  require('./orchestrator').start(); // routes events to the agents (only while 'agents' is on)
+  // A data-health scan shortly after imports (after the snapshot, which runs 30 s after). While the
+  // agents are on, their import review runs the scan instead.
   events.on('import.applied', 'data_quality', async () => {
+    if (await flags.isOn('agents')) return;
     clearTimeout(importTimer);
     importTimer = setTimeout(() => runInBackground('ai_dq_scan'), 90000);
     if (importTimer.unref) importTimer.unref();
